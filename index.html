@@ -46,11 +46,15 @@ button{cursor:pointer}
 #tiles{position:absolute;left:0;top:0}
 #tiles img{position:absolute;max-width:none;height:auto;pointer-events:none;-webkit-user-drag:none}
 #mapimg{display:block;width:2550px;height:1612px;max-width:none;pointer-events:none;-webkit-user-drag:none}
-#trackSvg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+#trackSvg{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;z-index:5}
 #trackSvg path{fill:none;vector-effect:non-scaling-stroke;stroke-linecap:round;stroke-linejoin:round}
-#trackSvg .case{stroke:#fff;stroke-width:7;opacity:.9}
-#trackSvg .line{stroke:var(--signal);stroke-width:3.5}
-#trackSvg .rec .line{stroke:var(--gps)}
+#trackSvg .case{stroke:#06222C;stroke-width:10;opacity:.85}
+#trackSvg .line{stroke:#00D2FF;stroke-width:5.5}
+#trackSvg .old .case{stroke-width:7;opacity:.4}
+#trackSvg .old .line{stroke-width:3.5;opacity:.75}
+#trackSvg .route .case{stroke:#151515;stroke-width:12;opacity:.75}
+#trackSvg .route .line{stroke:#FFD60A;stroke-width:6.5}
+#trackSvg .route:not(.active) .line{opacity:.65}
 #screenSvg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 #pins{position:absolute;inset:0;pointer-events:none}
 .pin{position:absolute;left:0;top:0;width:34px;height:42px;margin:-42px 0 0 -17px;will-change:transform}
@@ -140,7 +144,7 @@ nav.tabs button svg{width:24px;height:24px}
 nav.tabs button[aria-current="page"]{color:var(--ink)}
 nav.tabs button[aria-current="page"] svg{color:var(--signal)}
 #rot{position:absolute;inset:0}
-body.ride #rot{transition:transform .9s linear}
+body.ride #rot{transition:transform .45s linear}
 body.ride nav.tabs,body.ride .ctrls,body.ride #sheet,body.ride #scale,body.ride #banner{display:none!important}
 .pin{transform-origin:17px 42px}
 #me .arrow{display:none;position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
@@ -165,6 +169,10 @@ body.ride #me .dot,body.ride #me .cone{display:none!important}
 .dv{font-size:54px;font-weight:800;line-height:.95;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
 .dv.sm{font-size:30px;letter-spacing:-.02em}
 .dl{font-size:14px;color:var(--muted);font-weight:600;margin-top:4px}
+#dRoute{grid-column:1/-1;display:flex;justify-content:space-between;gap:10px;font-weight:800;font-size:17px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+#dRoute span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#dRoute span:last-child{flex:none}
+#dRoute.off{color:var(--signal)}
 #nosleep{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 @media (prefers-reduced-motion: reduce){.sheet,#toast{transition:none}body.ride #rot{transition:none}}
 </style>
@@ -204,6 +212,7 @@ body.ride #me .dot,body.ride #me .cone{display:none!important}
     </div>
     <div id="rideNote" hidden></div>
     <div id="rideDash" aria-live="off">
+      <div id="dRoute" hidden></div>
       <div><div class="dv" id="dSpeed">–</div><div class="dl">km/h</div></div>
       <div><div class="dv sm" id="dDist">0 m</div><div class="dl">Sträcka</div></div>
       <div><div class="dv sm" id="dTime">0:00</div><div class="dl">Tid</div></div>
@@ -226,6 +235,7 @@ body.ride #me .dot,body.ride #me .cone{display:none!important}
   <button data-tab="kalib"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Kalibrera</button>
 </nav>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
+<input type="file" id="gpxFile" hidden>
 
 <script>
 (function(){
@@ -243,9 +253,10 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const nf=(n,d)=>n.toLocaleString("sv-SE",{maximumFractionDigits:d,minimumFractionDigits:d});
 
 /* ---------- data ---------- */
-function emptyState(){return {v:1,updatedAt:0,calib:[],pins:[],tracks:[],recording:null};}
+function emptyState(){return {v:1,updatedAt:0,calib:[],pins:[],tracks:[],routes:[],activeRoute:null,recording:null};}
 function loadLocal(){try{const s=JSON.parse(localStorage.getItem(LS_KEY));if(s&&s.v===1)return Object.assign(emptyState(),s);}catch(e){}return emptyState();}
-function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}
+let warnedFull=false;
+function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));return true;}catch(e){if(!warnedFull){warnedFull=true;setTimeout(()=>toast("Lagringen för kartan är full. Exportera och ta bort gamla turer eller rutter.",6000),0);}return false;}}
 let state=loadLocal();
 let sharedCalib=[{"lat":59.2854973,"lng":18.1505392,"x":752.7,"y":408.6},{"lat":59.2692954,"lng":18.2477512,"x":1967.7,"y":805.3},{"lat":59.2373069,"lng":18.1770244,"x":1083.1,"y":1586.6}],sharedRef=null,isOwner=false,sharedLoaded=false,pendingRide=null;
 let syncStatus="local";
@@ -380,14 +391,16 @@ function rebuildPins(){
     n.classList.toggle("sel",p.id===selectedPin);
   }
 }
+function segPathOf(segs){return segs.filter(s=>s.length>1).map(s=>"M"+s.map(p=>{const q=toPx(p[0],p[1]);return q[0].toFixed(1)+" "+q[1].toFixed(1);}).join("L")).join("");}
+function grp(cls,d){return d?'<g class="'+cls+'"><path class="case" d="'+d+'"/><path class="line" d="'+d+'"/></g>':"";}
 function buildTracks(){
   if(!T){tSvg.innerHTML="";return;}
   let html="";
-  const segPath=segs=>segs.filter(s=>s.length>1).map(s=>"M"+s.map(p=>{const q=toPx(p[0],p[1]);return q[0].toFixed(1)+" "+q[1].toFixed(1);}).join("L")).join("");
-  for(const t of state.tracks){if(t.visible===false)continue;const d=segPath(t.segs);if(d)html+='<g><path class="case" d="'+d+'"/><path class="line" d="'+d+'"/></g>';}
-  if(state.recording){const d=segPath(state.recording.segs);if(d)html+='<g class="rec"><path class="case" d="'+d+'"/><path class="line" d="'+d+'"/></g>';}
-  tSvg.innerHTML=html;
+  for(const r of state.routes||[]){if(r.visible===false)continue;html+=grp("route"+(r.id===state.activeRoute?" active":""),segPathOf(r.segs));}
+  for(const tr of state.tracks){if(tr.visible===false)continue;html+=grp("old",segPathOf(tr.segs));}
+  tSvg.innerHTML=html+'<g id="gRec"></g>';buildRec();
 }
+function buildRec(){const g=tSvg.querySelector("#gRec");if(!g)return;g.innerHTML=state.recording&&T?grp("rec",segPathOf(state.recording.segs)):"";}
 /* high-resolution tiles: base image is 1 px per map unit, level 1 has 2, level 0 has 4 */
 const TILESETS=[{lvl:0,res:4,cols:4,rows:3,tw:2550,th:2150},{lvl:1,res:2,cols:2,rows:2,tw:2550,th:1612}];
 const tilesEl=$("#tiles"),tileNodes=new Map(),tileSrcCache=new Map();
@@ -579,7 +592,12 @@ $("#fitBtn").addEventListener("click",()=>{setFollow(false);const s=fitScale();a
 let wakeLock=null;
 async function lockScreen(){try{if(navigator.wakeLock&&!wakeLock){wakeLock=await navigator.wakeLock.request("screen");wakeLock.addEventListener("release",()=>{wakeLock=null;});}}catch(e){}}
 function unlockScreen(){try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;}
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&state.recording&&!state.recording.paused)lockScreen();if(document.visibilityState==="visible"&&ride)keepAwake(true);});
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="hidden"){if(state.recording)saveLocal();if(ride)ride.hiddenAt=Date.now();return;}
+  if(state.recording&&!state.recording.paused)lockScreen();
+  if(ride){keepAwake(true);if(ride.hiddenAt){const gap=Date.now()-ride.hiddenAt;ride.hiddenAt=null;if(gap>20000)toast("GPS:en var pausad i "+fmtDur(Math.max(60000,gap))+" medan skärmen var släckt.",5000);}}
+});
+window.addEventListener("pagehide",()=>{if(state.recording)saveLocal();});
 function recElapsed(r){return r.activeMs+(r.paused?0:Date.now()-r.resumedAt);}
 function recDist(segs){let d=0;for(const s of segs)for(let i=1;i<s.length;i++)d+=hav(s[i-1][0],s[i-1][1],s[i][0],s[i][1]);return d;}
 function startRec(){
@@ -587,12 +605,20 @@ function startRec(){
   state.recording={id:uid(),startedAt:now,activeMs:0,resumedAt:now,paused:false,segs:[[]],dist:0};
   commit({cloud:false});startGps();lockScreen();refreshSheet();
 }
+let lastRecSave=0;
 function recPoint(){
-  const r=state.recording;if(!r||r.paused||!gps||gps.acc>50)return;
-  const seg=r.segs[r.segs.length-1],last=seg[seg.length-1];
-  if(last){const d=hav(last[0],last[1],gps.lat,gps.lng);if(d<Math.max(5,gps.acc*0.5))return;r.dist+=d;}
-  seg.push([+gps.lat.toFixed(6),+gps.lng.toFixed(6),Math.round(gps.t/1000)]);
-  commit({cloud:false});buildTracks();
+  const r=state.recording;if(!r||r.paused||!gps||gps.acc>40)return;
+  const seg=r.segs[r.segs.length-1],last=seg[seg.length-1],ts=Math.round(gps.t/1000);
+  if(last){
+    const d=hav(last[0],last[1],gps.lat,gps.lng);
+    const still=gps.speed!=null&&isFinite(gps.speed)&&gps.speed<0.5&&d<gps.acc;
+    if(still||d<Math.min(10,Math.max(3,gps.acc*0.35)))return;
+    if(ts-last[2]>20)r.gapSec=(r.gapSec||0)+(ts-last[2]);
+    r.dist+=d;
+  }
+  seg.push([+gps.lat.toFixed(6),+gps.lng.toFixed(6),ts]);
+  const now=Date.now();if(now-lastRecSave>15000){lastRecSave=now;commit({cloud:false});}
+  buildRec();
 }
 function pauseRec(){const r=state.recording;if(!r)return;if(r.paused){r.paused=false;r.resumedAt=Date.now();r.segs.push([]);lockScreen();}else{r.activeMs+=Date.now()-r.resumedAt;r.paused=true;unlockScreen();}commit({cloud:false});refreshSheet();}
 function stopRec(){
@@ -624,6 +650,76 @@ function applyRot(instant){
   rot.style.transformOrigin=f[0]+"px "+f[1]+"px";rot.style.transform=d?"rotate("+(-d)+"deg)":"";
   if(instant){void rot.offsetWidth;rot.style.transition="";}
 }
+/* compass: turns the map also when standing still. GPS course takes over above ~7 km/h */
+const DECLINATION=6.5;
+let compassOn=false,compassHd=null,lastCompassApply=0;
+function setHeading(hd,k,fromGps){
+  if(!ride||!T)return;
+  ride.bearing+=normDeg(mapDeg(hd)-ride.bearing)*k;
+  if(Math.abs(ride.bearing)>540){ride.bearing=normDeg(ride.bearing);applyRot(true);}
+  if(!fromGps&&ride.locked)applyRot();
+  requestRender();
+}
+function headingFromEuler(a,b,g){
+  const r=Math.PI/180,cA=Math.cos(a*r),sA=Math.sin(a*r),cB=Math.cos(b*r),sB=Math.sin(b*r),cG=Math.cos(g*r),sG=Math.sin(g*r);
+  // direction between the top and the back of the phone, so it works flat, tilted or upright on the handlebar
+  const E=cA*(-sG)-sA*(cB+sB*cG),N=sA*(-sG)+cA*(cB+sB*cG);
+  if(Math.hypot(E,N)<0.2)return null;
+  return (Math.atan2(E,N)/r+360)%360;
+}
+function onOrient(e){
+  let h=null;
+  if(typeof e.webkitCompassHeading==="number"&&!isNaN(e.webkitCompassHeading))h=e.webkitCompassHeading;
+  else if(e.absolute&&e.alpha!=null&&e.beta!=null&&e.gamma!=null)h=headingFromEuler(e.alpha,e.beta,e.gamma);
+  if(h==null)return;
+  const so=(screen.orientation&&screen.orientation.angle)||0;
+  h=(h+so+DECLINATION+720)%360;
+  compassHd=compassHd==null?h:(compassHd+normDeg(h-compassHd)*0.25+360)%360;
+  const now=performance.now();if(now-lastCompassApply<150)return;lastCompassApply=now;
+  if(ride&&(ride.speed==null||ride.speed<=2))setHeading(compassHd,0.4,false);
+}
+function startCompass(){if(compassOn)return;compassOn=true;if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onOrient);else window.addEventListener("deviceorientation",onOrient);}
+function stopCompass(){window.removeEventListener("deviceorientationabsolute",onOrient);window.removeEventListener("deviceorientation",onOrient);compassOn=false;compassHd=null;}
+function requestCompass(){try{if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){DeviceOrientationEvent.requestPermission().then(s=>{if(s==="granted")startCompass();}).catch(()=>{});}else startCompass();}catch(e){}}
+
+/* route following */
+let routeCache=null;
+function activeRoute(){return state.activeRoute&&(state.routes||[]).find(r=>r.id===state.activeRoute)||null;}
+function routeData(r){if(routeCache&&routeCache.id===r.id)return routeCache;const pts=[];r.segs.forEach(s=>s.forEach(p=>pts.push(p)));const cum=[0];
+  for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+hav(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]));return routeCache={id:r.id,pts,cum,total:cum[cum.length-1]||0};}
+function routeProgress(){
+  const r=activeRoute();if(!r||!gps)return null;const d=routeData(r);if(d.pts.length<2)return null;
+  const kx=Math.cos(gps.lat*Math.PI/180)*111320,ky=110574;let best=Infinity,along=0;
+  for(let i=1;i<d.pts.length;i++){const a=d.pts[i-1],b=d.pts[i];const ax=(a[1]-gps.lng)*kx,ay=(a[0]-gps.lat)*ky,dx=(b[1]-a[1])*kx,dy=(b[0]-a[0])*ky,L2=dx*dx+dy*dy;
+    let u=L2>0?-(ax*dx+ay*dy)/L2:0;u=Math.max(0,Math.min(1,u));const dist=Math.hypot(ax+u*dx,ay+u*dy);
+    if(dist<best){best=dist;along=d.cum[i-1]+u*(d.cum[i]-d.cum[i-1]);}}
+  return {name:r.name,off:best,left:Math.max(0,d.total-along)};
+}
+function parseGpx(text){
+  const doc=new DOMParser().parseFromString(text,"application/xml");
+  if(doc.getElementsByTagName("parsererror").length)throw new Error("parse");
+  const byTag=(el,n)=>Array.from(el.getElementsByTagNameNS("*",n));const segs=[];
+  const take=els=>{const pts=[];for(const e of els){const la=parseFloat(e.getAttribute("lat")),lo=parseFloat(e.getAttribute("lon"));if(!isFinite(la)||!isFinite(lo))continue;
+    const l=pts[pts.length-1];if(l&&hav(l[0],l[1],la,lo)<2)continue;pts.push([+la.toFixed(6),+lo.toFixed(6)]);}if(pts.length>1)segs.push(pts);};
+  byTag(doc,"trkseg").forEach(s=>take(byTag(s,"trkpt")));
+  byTag(doc,"rte").forEach(r=>take(byTag(r,"rtept")));
+  const nm=byTag(doc,"name")[0];
+  return {segs,name:nm?nm.textContent.trim():""};
+}
+function fitSegs(segs){
+  if(!T)return;let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  segs.forEach(s=>s.forEach(p=>{const q=toPx(p[0],p[1]);x0=Math.min(x0,q[0]);y0=Math.min(y0,q[1]);x1=Math.max(x1,q[0]);y1=Math.max(y1,q[1]);}));
+  if(x0>x1)return;const vh=sheetVisible()?Math.max(H-sheetEl.offsetHeight,H*0.35):H;
+  const s=Math.min(MAX_S,Math.min(W/((x1-x0)+80),vh/((y1-y0)+80)));animateTo({s,tx:W/2-(x0+x1)/2*s,ty:vh/2-(y0+y1)/2*s},400);
+}
+$("#gpxFile").addEventListener("change",async e=>{
+  const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
+  try{const g=parseGpx(await f.text());if(!g.segs.length)throw 0;
+    const r={id:uid(),name:g.name||f.name.replace(/\.gpx$/i,"")||"Rutt",segs:g.segs,dist:recDist(g.segs),visible:true,added:Date.now()};
+    state.routes=state.routes||[];state.routes.unshift(r);state.activeRoute=r.id;routeCache=null;
+    commit();buildTracks();refreshSheet();fitSegs(r.segs);toast("Rutten är inläst och vald. Du följer den när du startar cyklingen.",4000);
+  }catch(err){toast("Filen gick inte att läsa. Välj en GPX-fil med en rutt eller ett spår.",4500);}
+});
 function keepAwake(on){const v=$("#nosleep");if(on){lockScreen();if(v)try{const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{});}catch(e){}}else{unlockScreen();if(v)try{v.pause();}catch(e){}}}
 function rideFollow(instant){
   if(!ride||!gps||!T||!ride.locked)return;
@@ -641,7 +737,7 @@ function rideOnPos(){
     else if(ride.courseFix&&hav(ride.courseFix.lat,ride.courseFix.lng,g.lat,g.lng)>8)hd=courseDeg(ride.courseFix,g);
   }
   if(!ride.courseFix||hav(ride.courseFix.lat,ride.courseFix.lng,g.lat,g.lng)>8)ride.courseFix={lat:g.lat,lng:g.lng};
-  if(hd!=null&&T){ride.bearing+=normDeg(mapDeg(hd)-ride.bearing)*0.6;if(Math.abs(ride.bearing)>540){ride.bearing=normDeg(ride.bearing);applyRot(true);}}
+  if(hd!=null&&T&&(sp>2||compassHd==null))setHeading(hd,0.6,true);
   if(ride.locked){applyRot();rideFollow(false);}
   updateRideUI();
 }
@@ -651,6 +747,13 @@ function updateRideUI(){
   $("#dSpeed").textContent=k==null?"–":String(k<2?0:Math.round(k));
   $("#dDist").textContent=r?fmtDist(r.dist):"0 m";
   $("#dTime").textContent=r?fmtClock(recElapsed(r)):"0:00";
+  const dr=$("#dRoute"),ar=activeRoute();
+  if(ar){const rp=routeProgress();dr.hidden=false;let cls="",html;
+    if(!rp)html="<span>"+esc(ar.name)+"</span><span>Söker GPS…</span>";
+    else if(rp.off>40){cls="off";html="<span>Utanför rutten</span><span>"+fmtDist(rp.off)+" bort</span>";}
+    else html="<span>"+esc(rp.name)+"</span><span>"+fmtDist(rp.left)+" kvar</span>";
+    if(dr.className!==cls)dr.className=cls;if(dr.innerHTML!==html)dr.innerHTML=html;}
+  else dr.hidden=true;
   let msg="";if(!gps)msg="Söker GPS…";else if(gps.acc>35)msg="Svag GPS-signal";
   if(!ride.locked)msg="Upplåst – låses igen efter en stund";
   const note=$("#rideNote");note.hidden=!msg;if(note.textContent!==msg)note.textContent=msg;
@@ -661,6 +764,7 @@ function updateRideUI(){
 }
 function startRide(){
   if(!T){setTab("kalib");toast("Kalibrera kartan först, så att din position hamnar rätt.",4000);return;}
+  requestCompass();
   const p=ridePrefs();
   ride={headingUp:p.headingUp!==false,locked:true,bearing:0,maxSpeed:0,speed:null,prevFix:null,courseFix:null};
   if(state.recording){if(state.recording.paused)pauseRec();}else startRec();
@@ -670,6 +774,7 @@ function startRide(){
   view.s=p.zoom&&isFinite(p.zoom)?Math.max(minScale(),Math.min(MAX_S,p.zoom)):Math.max(view.s,1.1);
   follow=true;startGps();keepAwake(true);updateRideUI();applyRot(true);render();
   setTimeout(()=>{mapRect=mapEl.getBoundingClientRect();W=mapRect.width;H=mapRect.height;applyRot(true);rideFollow(true);},80);
+  setTimeout(()=>{if(ride&&!wakeLock){const v=$("#nosleep");if(!v||v.paused)toast("Mobilen kan släcka skärmen under turen. Ställ in automatiskt skärmlås på Aldrig, annars pausas GPS:en.",6000);}},2500);
 }
 function rideTouched(){if(!ride||ride.locked)return;clearTimeout(relockTimer);relockTimer=setTimeout(relock,12000);}
 function unlockRide(){ride.bearing=normDeg(ride.bearing);applyRot(true);ride.locked=false;applyRot();setFollow(false);rideTouched();updateRideUI();render();}
@@ -678,10 +783,10 @@ function endRide(){
   if(!ride)return;saveRidePrefs();
   const r=state.recording;let saved=null;
   if(r){if(!r.paused)r.activeMs+=Date.now()-r.resumedAt;const segs=r.segs.filter(s=>s.length>1);state.recording=null;
-    if(segs.length){const d=new Date(r.startedAt);saved={id:r.id,name:"Tur "+d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"})+" "+d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}),startedAt:r.startedAt,durationMs:r.activeMs,dist:recDist(segs),segs,visible:true,maxSpeed:ride.maxSpeed};state.tracks.unshift(saved);}
+    if(segs.length){const d=new Date(r.startedAt);saved={id:r.id,name:"Tur "+d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"})+" "+d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}),startedAt:r.startedAt,durationMs:r.activeMs,dist:recDist(segs),segs,visible:true,maxSpeed:ride.maxSpeed,gapSec:r.gapSec||0};state.tracks.unshift(saved);}
     commit();}
   clearTimeout(relockTimer);ride=null;pendingRide=saved?saved.id:null;
-  document.body.classList.remove("ride");$("#ride").hidden=true;applyRot(true);keepAwake(false);
+  document.body.classList.remove("ride");$("#ride").hidden=true;applyRot(true);keepAwake(false);stopCompass();
   follow=false;stopGps();updateLocBtn();buildTracks();
   setTab("spar",false);openSheet("rideDone");requestRender();
 }
@@ -727,6 +832,7 @@ $("#importFile").addEventListener("change",async e=>{
     const pinIds=new Set(state.pins.map(p=>p.id)),trkIds=new Set(state.tracks.map(t=>t.id));
     const np=(d.pins||[]).filter(p=>!pinIds.has(p.id)),nt=(d.tracks||[]).filter(t=>!trkIds.has(t.id));
     state.pins.push(...np);state.tracks.push(...nt);
+    const rIds=new Set((state.routes||[]).map(r=>r.id));state.routes=(state.routes||[]).concat((d.routes||[]).filter(r=>!rIds.has(r.id)));
     if(!state.calib.length&&Array.isArray(d.calib))state.calib=d.calib;
     commit();onDataReplaced();toast("Läste in "+np.length+" platser och "+nt.length+" spår.");
   }catch(err){toast("Filen gick inte att läsa. Välj en säkerhetskopia från Min karta.");}
@@ -794,15 +900,18 @@ spar(){
   if(r)top='<p class="hint">Du har en tur som pågår'+(r.paused?" (pausad)":"")+', '+fmtDist(r.dist)+' hittills.</p><div class="btns"><button class="btn rec" data-act="rideStart">Fortsätt cyklingen</button><button class="btn" data-act="recStop">Avsluta och spara</button></div>';
   else top='<p class="hint">Cykelläget är gjort för mobilen på styret. Siffrorna är stora, kartan följer dig och vrids åt det håll du cyklar, och den är låst så att skakningar och regndroppar inte flyttar den. Turen spelas in automatiskt.</p>'+(T?"":noCalibNote("Kartan behöver kalibreras innan du kan se dig själv i cykelläget."))+
     '<div class="btns"><button class="btn rec wide" data-act="rideStart" '+(T?"":"disabled")+'>Starta cykling</button></div>'+
-    '<details><summary>Tips för styret</summary><p class="hint">Avsluta genom att hålla inne knappen uppe till vänster. Skärmen hålls tänd medan du cyklar, men om den ändå släcks kan du ställa in automatiskt skärmlås på Aldrig i telefonens inställningar under turen. Skärm och GPS drar mycket ström, så ta gärna med en powerbank på längre turer.</p></details>';
+    '<details><summary>Tips för styret</summary><p class="hint">Avsluta genom att hålla inne knappen uppe till vänster. Skärmen hålls tänd medan du cyklar, men om den ändå släcks kan du ställa in automatiskt skärmlås på Aldrig i telefonens inställningar under turen. Skärm och GPS drar mycket ström, så ta gärna med en powerbank på längre turer. När du står still vrids kartan med telefonens kompass. Magnetiska mobilhållare kan störa kompassen, men när du cyklar används GPS:en i stället.</p></details>';
   const list=state.tracks.map(t=>'<li><div class="row"><span class="ic">🚵</span><span class="tx"><span class="t1">'+esc(t.name)+'</span><span class="t2">'+fmtDist(t.dist)+" · "+fmtDur(t.durationMs)+(t.maxSpeed?" · max "+Math.round(t.maxSpeed*3.6)+" km/h":"")+'</span></span></div><div class="trk-actions"><button class="btn" data-act="trkShow" data-id="'+t.id+'">'+(t.visible===false?"Visa":"Dölj")+'</button><button class="btn" data-act="trkGo" data-id="'+t.id+'" '+(T?"":"disabled")+'>Gå till</button><button class="btn" data-act="trkExport" data-id="'+t.id+'">Exportera GPX</button><button class="btn danger" data-act="trkDel" data-id="'+t.id+'">Ta bort</button></div></li>').join("");
-  return '<h2>Cykla</h2>'+top+(state.tracks.length?'<h3>Sparade turer</h3><ul class="list">'+list+"</ul>":"");
+  const routes=state.routes||[];
+  const rlist=routes.map(r=>{const act=r.id===state.activeRoute;return '<li><div class="row"><span class="ic">🗺️</span><span class="tx"><span class="t1">'+esc(r.name)+'</span><span class="t2">'+fmtDist(r.dist)+(act?" · följs":"")+'</span></span></div><div class="trk-actions"><button class="btn'+(act?" primary":"")+'" data-act="routeFollow" data-id="'+r.id+'">'+(act?"Följs ✓":"Följ")+'</button><button class="btn" data-act="routeShow" data-id="'+r.id+'">'+(r.visible===false?"Visa":"Dölj")+'</button><button class="btn" data-act="routeGo" data-id="'+r.id+'" '+(T?"":"disabled")+'>Gå till</button><button class="btn danger" data-act="routeDel" data-id="'+r.id+'">Ta bort</button></div></li>';}).join("");
+  const routeHtml='<h3>Rutter att följa</h3><p class="hint">Ladda upp en GPX-fil som du planerat i till exempel Strava, Komoot eller Garmin. Den visas som en gul linje, och när du cyklar ser du hur långt det är kvar och om du kommit ifrån rutten.</p><div class="btns"><button class="btn" data-act="routeAdd">Ladda upp GPX-fil</button></div>'+(routes.length?'<ul class="list">'+rlist+'</ul>':'');
+  return '<h2>Cykla</h2>'+top+routeHtml+(state.tracks.length?'<h3>Sparade turer</h3><ul class="list">'+list+"</ul>":"");
 },
 rideDone(){
   const s=pendingRide&&state.tracks.find(x=>x.id===pendingRide);
   if(!s)return '<h2>Cyklingen är avslutad</h2><p class="hint">Ingen sträcka hann registreras, så det finns ingen tur att spara.</p><div class="btns"><button class="btn primary" data-act="rideOk">Klar</button></div>';
   const avg=s.durationMs>0?s.dist/(s.durationMs/1000)*3.6:0;
-  return '<h2>Bra kört!</h2><div class="big">'+fmtDist(s.dist)+'</div><p class="hint">'+fmtClock(s.durationMs)+" · snitt "+nf(avg,1)+" km/h · max "+Math.round((s.maxSpeed||0)*3.6)+' km/h</p><p class="hint">Turen är sparad.</p><label class="field"><span>Namn på turen</span><input id="rideName" maxlength="80" value="'+esc(s.name)+'"></label><div class="btns"><button class="btn primary wide" data-act="rideSave">Klar</button><button class="btn danger" data-act="rideDiscard">Ta bort turen</button></div>';
+  return '<h2>Bra kört!</h2><div class="big">'+fmtDist(s.dist)+'</div><p class="hint">'+fmtClock(s.durationMs)+" · snitt "+nf(avg,1)+" km/h · max "+Math.round((s.maxSpeed||0)*3.6)+' km/h</p>'+((s.gapSec||0)>60?'<div class="status warn">GPS:en var pausad i ungefär '+fmtDur(s.gapSec*1000)+', troligen för att skärmen släcktes. Sträckan kan därför bli kortare än den egentligen var.</div>':'')+'<p class="hint">Turen är sparad.</p><label class="field"><span>Namn på turen</span><input id="rideName" maxlength="80" value="'+esc(s.name)+'"></label><div class="btns"><button class="btn primary wide" data-act="rideSave">Klar</button><button class="btn danger" data-act="rideDiscard">Ta bort turen</button></div>';
 },
 kalib(){
   const P=state.calib;let status;
@@ -872,6 +981,11 @@ const ACT={
   mUndo(){measure.pop();requestRender();refreshSheet();},
   mClear(){measure=[];requestRender();refreshSheet();},
   rideStart(){startRide();},
+  routeAdd(){$("#gpxFile").click();},
+  routeFollow(b){const r=(state.routes||[]).find(x=>x.id===b.dataset.id);if(!r)return;if(state.activeRoute===r.id)state.activeRoute=null;else{state.activeRoute=r.id;r.visible=true;}routeCache=null;commit();buildTracks();refreshSheet();},
+  routeShow(b){const r=(state.routes||[]).find(x=>x.id===b.dataset.id);if(!r)return;r.visible=r.visible===false;commit();buildTracks();refreshSheet();},
+  routeGo(b){const r=(state.routes||[]).find(x=>x.id===b.dataset.id);if(!r)return;r.visible=true;commit();buildTracks();fitSegs(r.segs);refreshSheet();},
+  routeDel(b){armConfirm(b,"Tryck igen",()=>{state.routes=(state.routes||[]).filter(x=>x.id!==b.dataset.id);if(state.activeRoute===b.dataset.id)state.activeRoute=null;routeCache=null;commit();buildTracks();refreshSheet();});},
   rideSave(){const s=state.tracks.find(x=>x.id===pendingRide);if(s){const n=$("#rideName").value.trim();if(n&&n!==s.name){s.name=n;commit();}}pendingRide=null;openSheet("spar");},
   rideDiscard(b){armConfirm(b,"Tryck igen för att ta bort",()=>{state.tracks=state.tracks.filter(x=>x.id!==pendingRide);pendingRide=null;commit();buildTracks();requestRender();openSheet("spar");toast("Turen är borttagen.");});},
   rideOk(){pendingRide=null;openSheet("spar");},
