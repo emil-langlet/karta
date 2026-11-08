@@ -64,7 +64,7 @@ button{cursor:pointer}
 #me{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none}
 #me .acc{position:absolute;border-radius:50%;background:color-mix(in srgb,var(--gps) 16%,transparent);border:1px solid color-mix(in srgb,var(--gps) 45%,transparent);transform:translate(-50%,-50%)}
 #me .dot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:var(--gps);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
-#me .cone{position:absolute;width:0;height:0;margin:-40px 0 0 -17px;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:32px solid color-mix(in srgb,var(--gps) 50%,transparent);transform-origin:17px 40px}
+#me .cone{position:absolute;width:0;height:0;margin:-40px 0 0 -17px;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:32px solid color-mix(in srgb,var(--gps) 70%,transparent);transform-origin:17px 40px;filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff)}
 #loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-weight:600}
 
 .ctrls{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:4}
@@ -670,7 +670,7 @@ function headingFromEuler(a,b,g){
   return (Math.atan2(E,N)/r+360)%360;
 }
 function onOrient(e){
-  let h=null;
+  compassEvents++;let h=null;
   if(typeof e.webkitCompassHeading==="number"&&!isNaN(e.webkitCompassHeading))h=e.webkitCompassHeading;
   else if(e.absolute&&e.alpha!=null&&e.beta!=null&&e.gamma!=null)h=headingFromEuler(e.alpha,e.beta,e.gamma);
   if(h==null)return;
@@ -680,7 +680,11 @@ function onOrient(e){
   const now=performance.now();if(now-lastCompassApply<150)return;lastCompassApply=now;
   if(ride){if(ride.speed==null||ride.speed<=2)setHeading(compassHd,0.4,false);}else requestRender();
 }
-function startCompass(){if(compassOn)return;compassOn=true;if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onOrient);else window.addEventListener("deviceorientation",onOrient);}
+let compassEvents=0,compassChecked=false;
+function startCompass(){if(compassOn)return;compassOn=true;compassEvents=0;
+  window.addEventListener("deviceorientationabsolute",onOrient);window.addEventListener("deviceorientation",onOrient);
+  if(!compassChecked)setTimeout(()=>{if(!compassOn||compassHd!=null)return;compassChecked=true;
+    toast(compassEvents?"Telefonen skickar rörelsedata men ingen kompassriktning. Prova att kalibrera kompassen genom att röra telefonen i en åtta.":"Telefonen skickar ingen kompassriktning till sidan. Kontrollera att Rörelsesensorer är tillåtet för sidan i Chrome.",7000);},4000);}
 function stopCompass(){window.removeEventListener("deviceorientationabsolute",onOrient);window.removeEventListener("deviceorientation",onOrient);compassOn=false;compassHd=null;}
 function requestCompass(){try{if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){DeviceOrientationEvent.requestPermission().then(s=>{if(s==="granted")startCompass();}).catch(()=>{});}else startCompass();}catch(e){}}
 
@@ -928,7 +932,7 @@ kalib(){
   return '<h2>Kalibrera kartan</h2><p class="hint">För att din position ska hamna rätt behöver appen veta var några punkter på kartan ligger i verkligheten. Välj tydliga ställen, som vägkorsningar, broar eller udden på en sjö.</p>'+status+
   '<div class="btns"><button class="btn primary" data-act="calAdd">Lägg till punkt</button></div><ul class="list">'+rows+"</ul>"+
   '<details><summary>Så hittar du koordinater</summary><p class="hint">Öppna Google Maps, håll fingret på samma ställe som du pekat ut här tills en nål dyker upp, och kopiera siffrorna, till exempel 59.31120, 18.20350. Du kan också gå till platsen och använda telefonens GPS.</p></details>'+
-  '<h3>Dina data</h3><p class="hint">'+sync+'</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
+  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 6 · Kompass: '+(compassHd!=null?"fungerar":compassOn?(compassEvents?"ingen riktning":"ingen signal"):"av")+'</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
 },
 calibPoint(){
   return '<h2>Punkt '+(state.calib.length+1)+'</h2><p>Var ligger stället du markerade i verkligheten?</p><label class="field"><span>Koordinater (lat, long)</span><input id="calLL" inputmode="decimal" autocomplete="off" placeholder="59.31120, 18.20350"></label><div class="btns"><button class="btn primary wide" data-act="calSaveLL">Spara punkten</button></div>'+
