@@ -144,7 +144,6 @@ nav.tabs button svg{width:24px;height:24px}
 nav.tabs button[aria-current="page"]{color:var(--ink)}
 nav.tabs button[aria-current="page"] svg{color:var(--signal)}
 #rot{position:absolute;inset:0}
-body.ride #rot{transition:transform .45s linear}
 body.ride nav.tabs,body.ride .ctrls,body.ride #sheet,body.ride #scale,body.ride #banner{display:none!important}
 .pin{transform-origin:17px 42px}
 #me .arrow{display:none;position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
@@ -196,6 +195,7 @@ body.ride #me .dot,body.ride #me .cone{display:none!important}
     <button id="zoutBtn" aria-label="Zooma ut"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
     <div class="gap"></div>
     <button id="locBtn" data-state="off" aria-label="Visa min position"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11 21 3l-8 18-2-8z"/></svg></button>
+    <button id="northBtn" aria-label="Vrid kartan så att norr är uppåt" hidden><svg viewBox="0 0 24 24" style="width:26px;height:26px"><path d="M12 2.5 16.5 12h-9z" fill="var(--signal)"/><path d="M12 21.5 7.5 12h9z" fill="currentColor" opacity=".5"/></svg></button>
     <button id="fitBtn" aria-label="Visa hela kartan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   </div>
 
@@ -337,46 +337,50 @@ function fmtClock(ms){const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.fl
 function fmtLL(lat,lng){return lat.toFixed(5)+", "+lng.toFixed(5);}
 
 /* ---------- view ---------- */
-let view={s:1,tx:0,ty:0},W=0,H=0,mapRect={left:0,top:0};
+let view={s:1,r:0,tx:0,ty:0},W=0,H=0,mapRect={left:0,top:0};
 let rafPending=false;
 function requestRender(){if(!rafPending){rafPending=true;requestAnimationFrame(()=>{rafPending=false;render();});}}
 function fitScale(){return Math.min(W/IMG_W,H/IMG_H);}
 function minScale(){return fitScale()*0.85;}
+function normDeg(d){return ((d%360)+540)%360-180;}
+/* screen = translate(tx,ty) · rotate(r) · scale(s) · map point */
+function viewAt(x,y,s,r,px,py){const a=r*Math.PI/180,c=Math.cos(a),n=Math.sin(a),X=x*s,Y=y*s;return {s,r,tx:px-(c*X-n*Y),ty:py-(n*X+c*Y)};}
+function imgAt(v,sx,sy){const a=v.r*Math.PI/180,c=Math.cos(a),n=Math.sin(a),dx=sx-v.tx,dy=sy-v.ty;return [(c*dx+n*dy)/v.s,(-n*dx+c*dy)/v.s];}
 function clampView(){
-  view.s=Math.max(minScale(),Math.min(MAX_S,view.s));
-  const cw=IMG_W*view.s,ch=IMG_H*view.s,mx=W*0.45,my=H*0.5;
-  view.tx=cw<=W?Math.min(Math.max(view.tx,-cw/2),W-cw/2):Math.min(mx,Math.max(W-cw-mx,view.tx));
-  view.ty=ch<=H?Math.min(Math.max(view.ty,-ch/2),H-ch/2):Math.min(my,Math.max(H-ch-my,view.ty));
+  view.s=Math.max(minScale(),Math.min(MAX_S,view.s));view.r=normDeg(view.r||0);
+  const c=imgAt(view,W/2,H/2),cx=Math.min(IMG_W,Math.max(0,c[0])),cy=Math.min(IMG_H,Math.max(0,c[1]));
+  if(cx!==c[0]||cy!==c[1]){const v=viewAt(cx,cy,view.s,view.r,W/2,H/2);view.tx=v.tx;view.ty=v.ty;}
 }
-function centerOn(x,y,s){s=s||view.s;const vh=sheetVisible()?H-sheetEl.offsetHeight:H;return {s,tx:W/2-x*s,ty:Math.max(vh,H*0.35)/2-y*s};}
+function centerOn(x,y,s){s=s||view.s;const vh=sheetVisible()?H-sheetEl.offsetHeight:H;return viewAt(x,y,s,view.r,W/2,Math.max(vh,H*0.35)/2);}
 function resize(){
   const r=mapEl.getBoundingClientRect(); const first=!W;
-  let cx,cy; if(!first){cx=(W/2-view.tx)/view.s;cy=(H/2-view.ty)/view.s;}
+  let c0=null; if(!first)c0=imgAt(view,W/2,H/2);
   W=r.width;H=r.height;mapRect=r;
   if(first){
     let v=null;try{v=JSON.parse(localStorage.getItem(LS_VIEW));}catch(e){}
-    if(v&&isFinite(v.cx)&&isFinite(v.s)){view={s:v.s,tx:W/2-v.cx*v.s,ty:H/2-v.cy*v.s};}
-    else{const s=Math.max(fitScale(),Math.min(H/IMG_H,0.55));view={s,tx:(W-IMG_W*s)/2,ty:(H-IMG_H*s)/2};}
-  } else {view.tx=W/2-cx*view.s;view.ty=H/2-cy*view.s;}
+    if(v&&isFinite(v.cx)&&isFinite(v.s)){view=viewAt(v.cx,v.cy,v.s,isFinite(v.r)?v.r:0,W/2,H/2);}
+    else{const s=Math.max(fitScale(),Math.min(H/IMG_H,0.55));view=viewAt(IMG_W/2,IMG_H/2,s,0,W/2,H/2);}
+  } else view=viewAt(c0[0],c0[1],view.s,view.r,W/2,H/2);
   clampView();render();
 }
 let viewTimer=null;
-function saveViewSoon(){clearTimeout(viewTimer);viewTimer=setTimeout(()=>{try{localStorage.setItem(LS_VIEW,JSON.stringify({cx:(W/2-view.tx)/view.s,cy:(H/2-view.ty)/view.s,s:view.s}));}catch(e){}},700);}
+function saveViewSoon(){clearTimeout(viewTimer);viewTimer=setTimeout(()=>{try{const c=imgAt(view,W/2,H/2);localStorage.setItem(LS_VIEW,JSON.stringify({cx:c[0],cy:c[1],s:view.s,r:view.r}));}catch(e){}},700);}
 let anim=null;
 function cancelAnim(){if(anim){cancelAnimationFrame(anim);anim=null;}}
-function animateTo(t,dur,lin){
-  cancelAnim();const from={...view};const tgt={...t};
-  let to;if(lin)to={...tgt};else{const save=view;view=tgt;clampView();to={...view};view=save;}
+function animateTo(t,dur){
+  cancelAnim();const from={...view};let to={...t};if(to.r==null)to.r=from.r;
+  {const save=view;view=to;clampView();to={...view};view=save;}
   if(reduceMotion||dur===0){view=to;render();saveViewSoon();return;}
+  const c0=imgAt(from,W/2,H/2),c1=imgAt(to,W/2,H/2),dr=normDeg(to.r-from.r);
   dur=dur||300;const t0=performance.now();
-  const step=now=>{const k=Math.min(1,(now-t0)/dur),e=lin?k:1-Math.pow(1-k,3);
-    view={s:from.s+(to.s-from.s)*e,tx:from.tx+(to.tx-from.tx)*e,ty:from.ty+(to.ty-from.ty)*e};render();
-    if(k<1)anim=requestAnimationFrame(step);else{anim=null;saveViewSoon();}};
+  const step=now=>{const k=Math.min(1,(now-t0)/dur),e=1-Math.pow(1-k,3);
+    view=viewAt(c0[0]+(c1[0]-c0[0])*e,c0[1]+(c1[1]-c0[1])*e,from.s*Math.pow(to.s/from.s,e),from.r+dr*e,W/2,H/2);render();
+    if(k<1)anim=requestAnimationFrame(step);else{anim=null;view=to;render();saveViewSoon();}};
   anim=requestAnimationFrame(step);
 }
-function zoomAt(sx,sy,ns,animate){ns=Math.max(minScale(),Math.min(MAX_S,ns));const wx=(sx-view.tx)/view.s,wy=(sy-view.ty)/view.s;const t={s:ns,tx:sx-wx*ns,ty:sy-wy*ns};if(animate)animateTo(t,240);else{view=t;clampView();requestRender();saveViewSoon();}}
-const toScreen=(x,y)=>[x*view.s+view.tx,y*view.s+view.ty];
-const toImg=(x,y)=>[(x-view.tx)/view.s,(y-view.ty)/view.s];
+function zoomAt(sx,sy,ns,animate){ns=Math.max(minScale(),Math.min(MAX_S,ns));const w=imgAt(view,sx,sy);const tg=viewAt(w[0],w[1],ns,view.r,sx,sy);if(animate)animateTo(tg,240);else{view=tg;clampView();requestRender();saveViewSoon();}}
+function toScreen(x,y){const a=view.r*Math.PI/180,c=Math.cos(a),n=Math.sin(a),X=x*view.s,Y=y*view.s;return [c*X-n*Y+view.tx,n*X+c*Y+view.ty];}
+function toImg(x,y){return imgAt(view,x,y);}
 
 /* ---------- rendering ---------- */
 const pinNodes=new Map();
@@ -409,7 +413,7 @@ function updateTiles(){
   const set=need>2.3?TILESETS[0]:need>1.15?TILESETS[1]:null;
   const want=[];
   if(set){
-    const mg=rotDeg()?Math.max(W,H)*0.75:60,a=toImg(-mg,-mg),b=toImg(W+mg,H+mg),lw=set.tw/set.res,lh=set.th/set.res;
+    const mg=60,cs=[toImg(-mg,-mg),toImg(W+mg,-mg),toImg(-mg,H+mg),toImg(W+mg,H+mg)],a=[Math.min(...cs.map(c=>c[0])),Math.min(...cs.map(c=>c[1]))],b=[Math.max(...cs.map(c=>c[0])),Math.max(...cs.map(c=>c[1]))],lw=set.tw/set.res,lh=set.th/set.res;
     for(let j=0;j<set.rows;j++)for(let i=0;i<set.cols;i++){const x=i*lw,y=j*lh;if(x>b[0]||y>b[1]||x+lw<a[0]||y+lh<a[1])continue;want.push({k:"z"+set.lvl+"_"+i+"_"+j,x,y,w:lw});}
   }
   let allReady=true;
@@ -424,18 +428,19 @@ function updateTiles(){
 let wcTimer=null;
 function render(){
   layer.style.willChange="transform";clearTimeout(wcTimer);wcTimer=setTimeout(()=>{layer.style.willChange="auto";},220);
-  layer.style.transform="translate("+view.tx+"px,"+view.ty+"px) scale("+view.s+")";
+  layer.style.transform="translate("+view.tx+"px,"+view.ty+"px) rotate("+view.r+"deg) scale("+view.s+")";
+  const nr=normDeg(view.r);northBtn.hidden=Math.abs(nr)<0.5;northNeedle.style.transform="rotate("+nr+"deg)";
   updateTiles();
-  for(const p of state.pins){const n=pinNodes.get(p.id);if(!n)continue;const q=toScreen(p.x,p.y),rd=rotDeg();n.style.transform="translate("+q[0]+"px,"+q[1]+"px)"+(rd?" rotate("+rd+"deg)":"");}
+  for(const p of state.pins){const n=pinNodes.get(p.id);if(!n)continue;const q=toScreen(p.x,p.y);n.style.transform="translate("+q[0]+"px,"+q[1]+"px)";}
   // me
   if(gps&&T){
-    const q=toPx(gps.lat,gps.lng),sc=toScreen(q[0],q[1]);
+    const q=ride&&ride.locked&&rideDisp?rideDisp:toPx(gps.lat,gps.lng),sc=toScreen(q[0],q[1]);
     meEl.hidden=false;meEl.style.transform="translate("+sc[0]+"px,"+sc[1]+"px)";
     const r=Math.min(2000,Math.max(10,gps.acc*T.ppm*view.s));const acc=meEl.querySelector(".acc");acc.style.width=acc.style.height=(r*2)+"px";
     const cone=meEl.querySelector(".cone");
     const hh=compassHd!=null?compassHd:(gps.heading!=null&&!isNaN(gps.heading)&&gps.speed>0.6?gps.heading:null);
-    if(hh!=null){cone.hidden=false;cone.style.transform="rotate("+mapDeg(hh)+"deg)";}else cone.hidden=true;
-    if(ride)meEl.querySelector(".arrow").style.transform="rotate("+ride.bearing+"deg)";
+    if(hh!=null){cone.hidden=false;cone.style.transform="rotate("+(mapDeg(hh)+view.r)+"deg)";}else cone.hidden=true;
+    if(ride)meEl.querySelector(".arrow").style.transform="rotate("+(ride.bearing+view.r)+"deg)";
   } else meEl.hidden=true;
   // screen overlay
   let s="";
@@ -485,7 +490,7 @@ mapEl.addEventListener("pointerdown",e=>{
     clearTimeout(lpTimer);lpTimer=setTimeout(()=>{if(g&&g.type==="pan"&&!g.moved&&pointers.size===1){g.long=true;onLongPress(p);}},560);
   } else if(pointers.size===2){
     clearTimeout(lpTimer);const [a,b]=[...pointers.values()];
-    g={type:"pinch",d0:dist(a,b)||1,m0:mid(a,b),s0:view.s,tx0:view.tx,ty0:view.ty,multi:true,moved:true};
+    const m0=mid(a,b);g={type:"pinch",d0:dist(a,b)||1,s0:view.s,r0:view.r,w0:toImg(m0.x,m0.y),ang0:Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI,rot:false,multi:true,moved:true};
   }
 });
 mapEl.addEventListener("pointermove",e=>{
@@ -496,8 +501,10 @@ mapEl.addEventListener("pointermove",e=>{
     if(g.moved){view.tx=g.tx+dx;view.ty=g.ty+dy;clampView();requestRender();samples.push({x:p.x,y:p.y,t:performance.now()});if(samples.length>8)samples.shift();}
   } else if(g.type==="pinch"&&pointers.size>=2){
     const [a,b]=[...pointers.values()];const d=dist(a,b),m=mid(a,b);
-    const s=Math.max(minScale(),Math.min(MAX_S,g.s0*d/g.d0));const wx=(g.m0.x-g.tx0)/g.s0,wy=(g.m0.y-g.ty0)/g.s0;
-    view.s=s;view.tx=m.x-wx*s;view.ty=m.y-wy*s;clampView();requestRender();setFollow(false);
+    const s=Math.max(minScale(),Math.min(MAX_S,g.s0*d/g.d0)),ang=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
+    if(!g.rot&&Math.abs(normDeg(ang-g.ang0))>15){g.rot=true;g.ang0=ang;g.r0=view.r;}
+    const r=g.rot?g.r0+normDeg(ang-g.ang0):g.r0;
+    view=viewAt(g.w0[0],g.w0[1],s,r,m.x,m.y);clampView();requestRender();setFollow(false);
   }
 });
 function endPointer(e){
@@ -587,7 +594,9 @@ $("#locBtn").addEventListener("click",()=>{
 });
 $("#zinBtn").addEventListener("click",()=>zoomAt(W/2,H/2,view.s*1.6,true));
 $("#zoutBtn").addEventListener("click",()=>zoomAt(W/2,H/2,view.s/1.6,true));
-$("#fitBtn").addEventListener("click",()=>{setFollow(false);const s=fitScale();animateTo({s,tx:(W-IMG_W*s)/2,ty:(H-IMG_H*s)/2},350);});
+$("#fitBtn").addEventListener("click",()=>{setFollow(false);const s=fitScale();animateTo(viewAt(IMG_W/2,IMG_H/2,s,0,W/2,H/2),350);});
+const northBtn=$("#northBtn"),northNeedle=northBtn.querySelector("svg");
+northBtn.addEventListener("click",()=>{const c=imgAt(view,W/2,H/2);animateTo(viewAt(c[0],c[1],view.s,0,W/2,H/2),350);});
 
 /* ---------- track recording ---------- */
 let wakeLock=null;
@@ -640,27 +649,39 @@ const ICON_LOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const ICON_UNLOCK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.6-1.7"/></svg>';
 const ICON_HEAD='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5 19 20l-7-4-7 4z"/></svg>';
 function ridePrefs(){try{return JSON.parse(localStorage.getItem(LS_RIDE))||{};}catch(e){return {};}}
-function saveRidePrefs(){if(!ride)return;try{localStorage.setItem(LS_RIDE,JSON.stringify({headingUp:ride.headingUp,zoom:view.s}));}catch(e){}}
-function rotDeg(){return ride&&ride.headingUp&&ride.locked?ride.bearing:0;}
-function normDeg(d){return ((d%360)+540)%360-180;}
+function saveRidePrefs(){if(!ride)return;try{localStorage.setItem(LS_RIDE,JSON.stringify({headingUp:ride.headingUp,zoom:ride.locked?ride.ts:view.s}));}catch(e){}}
 function focal(){const d=$("#rideDash"),h=H-(ride&&d?d.offsetHeight:0);return [W/2,ride&&ride.headingUp&&ride.locked?h*0.68:h*0.5];}
+let rideDisp=null,rideRaf=null,rideLast=0,rideDrawn=null;
+function rideTick(now){
+  if(!ride){rideRaf=null;return;}
+  const dt=Math.min(100,now-(rideLast||now));rideLast=now;
+  if(ride.locked&&T){
+    if(gps){const tg=toPx(gps.lat,gps.lng);
+      if(!rideDisp||Math.hypot(tg[0]-rideDisp[0],tg[1]-rideDisp[1])>400)rideDisp=tg.slice();
+      else{const k=1-Math.exp(-dt/380);rideDisp[0]+=(tg[0]-rideDisp[0])*k;rideDisp[1]+=(tg[1]-rideDisp[1])*k;}}
+    if(rideDisp){
+      const kr=1-Math.exp(-dt/230),tr=ride.headingUp?-ride.bearing:0,r=normDeg(view.r+normDeg(tr-view.r)*kr);
+      const s=view.s*Math.pow(ride.ts/view.s,1-Math.exp(-dt/200));
+      const f=focal();ride.fy=ride.fy==null?f[1]:ride.fy+(f[1]-ride.fy)*(1-Math.exp(-dt/300));
+      view=viewAt(rideDisp[0],rideDisp[1],s,r,f[0],ride.fy);
+      const d=rideDrawn;
+      if(!d||Math.abs(normDeg(d.r-view.r))>0.05||Math.abs(d.tx-view.tx)>0.15||Math.abs(d.ty-view.ty)>0.15||Math.abs(d.s-view.s)/view.s>0.0004){rideDrawn={...view};render();}
+    }
+  }
+  rideRaf=requestAnimationFrame(rideTick);
+}
+function startRideLoop(){rideDisp=null;rideDrawn=null;rideLast=0;if(!rideRaf)rideRaf=requestAnimationFrame(rideTick);}
 function mapDeg(h){const r=h*Math.PI/180,dr=Math.sin(r),di=Math.cos(r),qr=T.a[0]*dr-T.a[1]*di,qi=T.a[0]*di+T.a[1]*dr;return Math.atan2(qr,qi)*180/Math.PI;}
 function courseDeg(a,b){const r=Math.PI/180,y=Math.sin((b.lng-a.lng)*r)*Math.cos(b.lat*r),x=Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos((b.lng-a.lng)*r);return (Math.atan2(y,x)/r+360)%360;}
-function applyRot(instant){
-  const rot=$("#rot"),f=focal(),d=rotDeg();
-  if(instant)rot.style.transition="none";
-  rot.style.transformOrigin=f[0]+"px "+f[1]+"px";rot.style.transform=d?"rotate("+(-d)+"deg)":"";
-  if(instant){void rot.offsetWidth;rot.style.transition="";}
-}
+
 /* compass: turns the map also when standing still. GPS course takes over above ~7 km/h */
 const DECLINATION=6.5;
 let compassOn=false,compassHd=null,lastCompassApply=0;
 function setHeading(hd,k,fromGps){
   if(!ride||!T)return;
   ride.bearing+=normDeg(mapDeg(hd)-ride.bearing)*k;
-  if(Math.abs(ride.bearing)>540){ride.bearing=normDeg(ride.bearing);applyRot(true);}
-  if(!fromGps&&ride.locked)applyRot();
-  requestRender();
+  ride.bearing=normDeg(ride.bearing);
+  if(!ride.locked)requestRender();
 }
 function headingFromEuler(a,b,g){
   const r=Math.PI/180,cA=Math.cos(a*r),sA=Math.sin(a*r),cB=Math.cos(b*r),sB=Math.sin(b*r),cG=Math.cos(g*r),sG=Math.sin(g*r);
@@ -714,7 +735,7 @@ function fitSegs(segs){
   if(!T)return;let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   segs.forEach(s=>s.forEach(p=>{const q=toPx(p[0],p[1]);x0=Math.min(x0,q[0]);y0=Math.min(y0,q[1]);x1=Math.max(x1,q[0]);y1=Math.max(y1,q[1]);}));
   if(x0>x1)return;const vh=sheetVisible()?Math.max(H-sheetEl.offsetHeight,H*0.35):H;
-  const s=Math.min(MAX_S,Math.min(W/((x1-x0)+80),vh/((y1-y0)+80)));animateTo({s,tx:W/2-(x0+x1)/2*s,ty:vh/2-(y0+y1)/2*s},400);
+  const s=Math.min(MAX_S,Math.min(W/((x1-x0)+80),vh/((y1-y0)+80)));animateTo(viewAt((x0+x1)/2,(y0+y1)/2,s,view.r,W/2,vh/2),400);
 }
 $("#gpxFile").addEventListener("change",async e=>{
   const f=e.target.files&&e.target.files[0];e.target.value="";if(!f)return;
@@ -725,11 +746,6 @@ $("#gpxFile").addEventListener("change",async e=>{
   }catch(err){toast("Filen gick inte att läsa. Välj en GPX-fil med en rutt eller ett spår.",4500);}
 });
 function keepAwake(on){const v=$("#nosleep");if(on){lockScreen();if(v)try{const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{});}catch(e){}}else{unlockScreen();if(v)try{v.pause();}catch(e){}}}
-function rideFollow(instant){
-  if(!ride||!gps||!T||!ride.locked)return;
-  const q=toPx(gps.lat,gps.lng),f=focal(),s=view.s,tg={s,tx:f[0]-q[0]*s,ty:f[1]-q[1]*s};
-  if(instant){cancelAnim();view=tg;render();}else animateTo(tg,950,true);
-}
 function rideOnPos(){
   const g=gps;let sp=(g.speed!=null&&isFinite(g.speed)&&g.speed>=0)?g.speed:null;
   const pf=ride.prevFix;if(pf){const dt=(g.t-pf.t)/1000;if(dt>0.5){const cs=hav(pf.lat,pf.lng,g.lat,g.lng)/dt;if(sp==null||(sp===0&&cs>1.5))sp=cs;}}
@@ -742,7 +758,7 @@ function rideOnPos(){
   }
   if(!ride.courseFix||hav(ride.courseFix.lat,ride.courseFix.lng,g.lat,g.lng)>8)ride.courseFix={lat:g.lat,lng:g.lng};
   if(hd!=null&&T&&(sp>2||compassHd==null))setHeading(hd,0.6,true);
-  if(ride.locked){applyRot();rideFollow(false);}
+  if(!ride.locked)requestRender();
   updateRideUI();
 }
 function updateRideUI(){
@@ -777,25 +793,28 @@ function startRide(){
   sheet=null;sheetEl.hidden=true;
   document.body.classList.add("ride");$("#ride").hidden=false;
   view.s=p.zoom&&isFinite(p.zoom)?Math.max(minScale(),Math.min(MAX_S,p.zoom)):Math.max(view.s,1.1);
-  follow=true;startGps();keepAwake(true);updateRideUI();applyRot(true);render();
-  setTimeout(()=>{mapRect=mapEl.getBoundingClientRect();W=mapRect.width;H=mapRect.height;applyRot(true);rideFollow(true);},80);
+  ride.ts=view.s;cancelAnim();stopInertia();
+  follow=true;startGps();keepAwake(true);updateRideUI();render();startRideLoop();
+  setTimeout(()=>{mapRect=mapEl.getBoundingClientRect();W=mapRect.width;H=mapRect.height;},80);
   setTimeout(()=>{if(ride&&!wakeLock){const v=$("#nosleep");if(!v||v.paused)toast("Mobilen kan släcka skärmen under turen. Ställ in automatiskt skärmlås på Aldrig, annars pausas GPS:en.",6000);}},2500);
 }
 function rideTouched(){if(!ride||ride.locked)return;clearTimeout(relockTimer);relockTimer=setTimeout(relock,12000);}
-function unlockRide(){ride.bearing=normDeg(ride.bearing);applyRot(true);ride.locked=false;applyRot();setFollow(false);rideTouched();updateRideUI();render();}
-function relock(){if(!ride)return;clearTimeout(relockTimer);ride.bearing=normDeg(ride.bearing);ride.locked=true;follow=true;applyRot();rideFollow(false);saveRidePrefs();updateRideUI();render();}
+function unlockRide(){ride.locked=false;setFollow(false);rideTouched();updateRideUI();render();}
+function relock(){if(!ride)return;clearTimeout(relockTimer);cancelAnim();stopInertia();ride.ts=view.s;ride.locked=true;follow=true;rideDrawn=null;saveRidePrefs();updateRideUI();render();}
 function endRide(){
   if(!ride)return;saveRidePrefs();
   finishRec(ride.maxSpeed);
   clearTimeout(relockTimer);ride=null;
-  document.body.classList.remove("ride");$("#ride").hidden=true;applyRot(true);keepAwake(false);
+  document.body.classList.remove("ride");$("#ride").hidden=true;keepAwake(false);
+  setTimeout(()=>{const c=imgAt(view,W/2,H/2);animateTo(viewAt(c[0],c[1],view.s,0,W/2,H/2),450);},120);
   follow=false;stopGps();updateLocBtn();buildTracks();
   setTab("spar",false);openSheet("rideDone");requestRender();
 }
 $("#lockBtn").addEventListener("click",()=>{if(!ride)return;if(ride.locked)unlockRide();else relock();});
-$("#rZin").addEventListener("click",()=>{if(!ride)return;const f=focal();zoomAt(f[0],f[1],view.s*1.4,true);rideTouched();setTimeout(saveRidePrefs,400);});
-$("#rZout").addEventListener("click",()=>{if(!ride)return;const f=focal();zoomAt(f[0],f[1],view.s/1.4,true);rideTouched();setTimeout(saveRidePrefs,400);});
-$("#orientBtn").addEventListener("click",()=>{if(!ride)return;ride.bearing=normDeg(ride.bearing);applyRot(true);ride.headingUp=!ride.headingUp;applyRot();rideFollow(false);saveRidePrefs();updateRideUI();render();});
+function rideZoom(f){if(!ride)return;if(ride.locked){ride.ts=Math.max(minScale(),Math.min(MAX_S,ride.ts*f));}else{const c=focal();zoomAt(c[0],c[1],view.s*f,true);rideTouched();}setTimeout(saveRidePrefs,400);}
+$("#rZin").addEventListener("click",()=>rideZoom(1.4));
+$("#rZout").addEventListener("click",()=>rideZoom(1/1.4));
+$("#orientBtn").addEventListener("click",()=>{if(!ride)return;ride.headingUp=!ride.headingUp;saveRidePrefs();updateRideUI();});
 (function(){const b=$("#rideEnd");let tm=null;
   const cancel=()=>{clearTimeout(tm);b.classList.remove("holding");};
   b.addEventListener("pointerdown",e=>{e.preventDefault();b.classList.add("holding");clearTimeout(tm);tm=setTimeout(()=>{b.classList.remove("holding");endRide();},1200);});
@@ -930,7 +949,7 @@ kalib(){
   return '<h2>Kalibrera kartan</h2><p class="hint">För att din position ska hamna rätt behöver appen veta var några punkter på kartan ligger i verkligheten. Välj tydliga ställen, som vägkorsningar, broar eller udden på en sjö.</p>'+status+
   '<div class="btns"><button class="btn primary" data-act="calAdd">Lägg till punkt</button></div><ul class="list">'+rows+"</ul>"+
   '<details><summary>Så hittar du koordinater</summary><p class="hint">Öppna Google Maps, håll fingret på samma ställe som du pekat ut här tills en nål dyker upp, och kopiera siffrorna, till exempel 59.31120, 18.20350. Du kan också gå till platsen och använda telefonens GPS.</p></details>'+
-  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 8</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
+  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 9</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
 },
 calibPoint(){
   return '<h2>Punkt '+(state.calib.length+1)+'</h2><p>Var ligger stället du markerade i verkligheten?</p><label class="field"><span>Koordinater (lat, long)</span><input id="calLL" inputmode="decimal" autocomplete="off" placeholder="59.31120, 18.20350"></label><div class="btns"><button class="btn primary wide" data-act="calSaveLL">Spara punkten</button></div>'+
@@ -1002,7 +1021,7 @@ const ACT={
   trkGo(b){const t=state.tracks.find(x=>x.id===b.dataset.id);if(!t||!T)return;t.visible=true;commit();buildTracks();
     let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;t.segs.forEach(s=>s.forEach(p=>{const q=toPx(p[0],p[1]);x0=Math.min(x0,q[0]);y0=Math.min(y0,q[1]);x1=Math.max(x1,q[0]);y1=Math.max(y1,q[1]);}));
     const vh=sheetVisible()?Math.max(H-sheetEl.offsetHeight,H*0.35):H;const s=Math.min(MAX_S,Math.min(W/((x1-x0)+80),vh/((y1-y0)+80)));
-    animateTo({s,tx:W/2-(x0+x1)/2*s,ty:vh/2-(y0+y1)/2*s},400);refreshSheet();},
+    animateTo(viewAt((x0+x1)/2,(y0+y1)/2,s,view.r,W/2,vh/2),400);refreshSheet();},
   trkExport(b){const t=state.tracks.find(x=>x.id===b.dataset.id);if(!t)return;offerDownload(safeName(t.name)+".zip",makeZip([{name:safeName(t.name)+".gpx",text:gpxTrack(t)}]));},
   trkDel(b){armConfirm(b,"Tryck igen",()=>{state.tracks=state.tracks.filter(x=>x.id!==b.dataset.id);commit();buildTracks();refreshSheet();});},
   calAdd(){setPlacing("placeCalib","Tryck på kartan där referenspunkten ligger");},
