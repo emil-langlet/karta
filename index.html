@@ -258,7 +258,7 @@ function loadLocal(){try{const s=JSON.parse(localStorage.getItem(LS_KEY));if(s&&
 let warnedFull=false;
 function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));return true;}catch(e){if(!warnedFull){warnedFull=true;setTimeout(()=>toast("Lagringen för kartan är full. Exportera och ta bort gamla turer eller rutter.",6000),0);}return false;}}
 let state=loadLocal();
-let sharedCalib=[{"lat":59.2854973,"lng":18.1505392,"x":752.7,"y":408.6},{"lat":59.2692954,"lng":18.2477512,"x":1967.7,"y":805.3},{"lat":59.2373069,"lng":18.1770244,"x":1083.1,"y":1586.6}],sharedRef=null,isOwner=false,sharedLoaded=false,pendingRideUnused=null;
+let sharedCalib=[{"lat":59.2692954,"lng":18.2477512,"x":1967.7,"y":805.3},{"lat":59.2373069,"lng":18.1770244,"x":1083.1,"y":1586.6},{"lat":59.2493719,"lng":18.1432493,"x":660.9,"y":1292.3},{"lat":59.2956158,"lng":18.2568157,"x":2080.8,"y":160.9}],sharedRef=null,isOwner=false,sharedLoaded=false,pendingRideUnused=null;
 let syncStatus="local";
 function commit(opts){opts=opts||{};state.updatedAt=Date.now();saveLocal();if(opts.cloud!==false)scheduleCloud();}
 
@@ -930,7 +930,7 @@ kalib(){
   return '<h2>Kalibrera kartan</h2><p class="hint">För att din position ska hamna rätt behöver appen veta var några punkter på kartan ligger i verkligheten. Välj tydliga ställen, som vägkorsningar, broar eller udden på en sjö.</p>'+status+
   '<div class="btns"><button class="btn primary" data-act="calAdd">Lägg till punkt</button></div><ul class="list">'+rows+"</ul>"+
   '<details><summary>Så hittar du koordinater</summary><p class="hint">Öppna Google Maps, håll fingret på samma ställe som du pekat ut här tills en nål dyker upp, och kopiera siffrorna, till exempel 59.31120, 18.20350. Du kan också gå till platsen och använda telefonens GPS.</p></details>'+
-  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 7</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
+  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 8</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
 },
 calibPoint(){
   return '<h2>Punkt '+(state.calib.length+1)+'</h2><p>Var ligger stället du markerade i verkligheten?</p><label class="field"><span>Koordinater (lat, long)</span><input id="calLL" inputmode="decimal" autocomplete="off" placeholder="59.31120, 18.20350"></label><div class="btns"><button class="btn primary wide" data-act="calSaveLL">Spara punkten</button></div>'+
