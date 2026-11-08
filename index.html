@@ -64,7 +64,7 @@ button{cursor:pointer}
 #me{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none}
 #me .acc{position:absolute;border-radius:50%;background:color-mix(in srgb,var(--gps) 16%,transparent);border:1px solid color-mix(in srgb,var(--gps) 45%,transparent);transform:translate(-50%,-50%)}
 #me .dot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:var(--gps);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
-#me .cone{position:absolute;width:0;height:0;margin:-30px 0 0 -9px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:20px solid color-mix(in srgb,var(--gps) 55%,transparent);transform-origin:9px 30px}
+#me .cone{position:absolute;width:0;height:0;margin:-40px 0 0 -17px;border-left:17px solid transparent;border-right:17px solid transparent;border-bottom:32px solid color-mix(in srgb,var(--gps) 50%,transparent);transform-origin:17px 40px}
 #loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-weight:600}
 
 .ctrls{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:4}
@@ -253,12 +253,12 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const nf=(n,d)=>n.toLocaleString("sv-SE",{maximumFractionDigits:d,minimumFractionDigits:d});
 
 /* ---------- data ---------- */
-function emptyState(){return {v:1,updatedAt:0,calib:[],pins:[],tracks:[],routes:[],activeRoute:null,recording:null};}
+function emptyState(){return {v:1,updatedAt:0,calib:[],pins:[],tracks:[],routes:[],activeRoute:null,recording:null,pendingRide:null};}
 function loadLocal(){try{const s=JSON.parse(localStorage.getItem(LS_KEY));if(s&&s.v===1)return Object.assign(emptyState(),s);}catch(e){}return emptyState();}
 let warnedFull=false;
 function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));return true;}catch(e){if(!warnedFull){warnedFull=true;setTimeout(()=>toast("Lagringen för kartan är full. Exportera och ta bort gamla turer eller rutter.",6000),0);}return false;}}
 let state=loadLocal();
-let sharedCalib=[{"lat":59.2854973,"lng":18.1505392,"x":752.7,"y":408.6},{"lat":59.2692954,"lng":18.2477512,"x":1967.7,"y":805.3},{"lat":59.2373069,"lng":18.1770244,"x":1083.1,"y":1586.6}],sharedRef=null,isOwner=false,sharedLoaded=false,pendingRide=null;
+let sharedCalib=[{"lat":59.2854973,"lng":18.1505392,"x":752.7,"y":408.6},{"lat":59.2692954,"lng":18.2477512,"x":1967.7,"y":805.3},{"lat":59.2373069,"lng":18.1770244,"x":1083.1,"y":1586.6}],sharedRef=null,isOwner=false,sharedLoaded=false,pendingRideUnused=null;
 let syncStatus="local";
 function commit(opts){opts=opts||{};state.updatedAt=Date.now();saveLocal();if(opts.cloud!==false)scheduleCloud();}
 
@@ -397,7 +397,6 @@ function buildTracks(){
   if(!T){tSvg.innerHTML="";return;}
   let html="";
   for(const r of state.routes||[]){if(r.visible===false)continue;html+=grp("route"+(r.id===state.activeRoute?" active":""),segPathOf(r.segs));}
-  for(const tr of state.tracks){if(tr.visible===false)continue;html+=grp("old",segPathOf(tr.segs));}
   tSvg.innerHTML=html+'<g id="gRec"></g>';buildRec();
 }
 function buildRec(){const g=tSvg.querySelector("#gRec");if(!g)return;g.innerHTML=state.recording&&T?grp("rec",segPathOf(state.recording.segs)):"";}
@@ -434,7 +433,8 @@ function render(){
     meEl.hidden=false;meEl.style.transform="translate("+sc[0]+"px,"+sc[1]+"px)";
     const r=Math.min(2000,Math.max(10,gps.acc*T.ppm*view.s));const acc=meEl.querySelector(".acc");acc.style.width=acc.style.height=(r*2)+"px";
     const cone=meEl.querySelector(".cone");
-    if(gps.heading!=null&&!isNaN(gps.heading)&&gps.speed>0.6){const h=gps.heading*Math.PI/180,dr=Math.sin(h),di=Math.cos(h),qr=T.a[0]*dr-T.a[1]*di,qi=T.a[0]*di+T.a[1]*dr;cone.hidden=false;cone.style.transform="rotate("+(Math.atan2(qr,qi)*180/Math.PI)+"deg)";}else cone.hidden=true;
+    const hh=compassHd!=null?compassHd:(gps.heading!=null&&!isNaN(gps.heading)&&gps.speed>0.6?gps.heading:null);
+    if(hh!=null){cone.hidden=false;cone.style.transform="rotate("+mapDeg(hh)+"deg)";}else cone.hidden=true;
     if(ride)meEl.querySelector(".arrow").style.transform="rotate("+ride.bearing+"deg)";
   } else meEl.hidden=true;
   // screen overlay
@@ -555,7 +555,7 @@ function startGps(){
   watchId=navigator.geolocation.watchPosition(onPos,onPosErr,{enableHighAccuracy:true,maximumAge:2000,timeout:30000});
   return true;
 }
-function stopGps(){if(watchId!=null&&!state.recording){navigator.geolocation.clearWatch(watchId);watchId=null;gps=null;requestRender();}}
+function stopGps(){if(watchId!=null&&!state.recording){navigator.geolocation.clearWatch(watchId);watchId=null;gps=null;if(!ride)stopCompass();requestRender();}}
 function onPos(pos){
   const c=pos.coords;const first=!gps;
   gps={lat:c.latitude,lng:c.longitude,acc:c.accuracy||50,heading:c.heading,speed:c.speed||0,t:pos.timestamp||Date.now()};
@@ -578,6 +578,7 @@ function onPosErr(err){
 function setFollow(v){if(follow!==v){follow=v;updateLocBtn();}}
 function updateLocBtn(){const b=$("#locBtn");b.dataset.state=watchId==null?"off":follow?"follow":"on";b.setAttribute("aria-pressed",follow?"true":"false");}
 $("#locBtn").addEventListener("click",()=>{
+  requestCompass();
   if(!T){startGps();setTab("kalib");toast("Kalibrera kartan först, så hamnar din position rätt.",4000);return;}
   if(watchId==null){if(startGps()){follow=true;toast("Söker position…",1800);}}
   else if(!follow){follow=true;if(gps){const q=toPx(gps.lat,gps.lng);animateTo(centerOn(q[0],q[1]),300);}}
@@ -621,14 +622,15 @@ function recPoint(){
   buildRec();
 }
 function pauseRec(){const r=state.recording;if(!r)return;if(r.paused){r.paused=false;r.resumedAt=Date.now();r.segs.push([]);lockScreen();}else{r.activeMs+=Date.now()-r.resumedAt;r.paused=true;unlockScreen();}commit({cloud:false});refreshSheet();}
+function finishRec(maxSpeed){
+  const r=state.recording;if(!r)return null;if(!r.paused)r.activeMs+=Date.now()-r.resumedAt;
+  const segs=r.segs.filter(s=>s.length>1);state.recording=null;unlockScreen();let sum=null;
+  if(segs.length){const d=new Date(r.startedAt);sum={id:r.id,name:"Tur "+d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"})+" "+d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}),startedAt:r.startedAt,durationMs:r.activeMs,dist:recDist(segs),segs,maxSpeed:maxSpeed||0,gapSec:r.gapSec||0};}
+  state.pendingRide=sum;commit();return sum;
+}
 function stopRec(){
-  const r=state.recording;if(!r)return;if(!r.paused)r.activeMs+=Date.now()-r.resumedAt;
-  const segs=r.segs.filter(s=>s.length>1);state.recording=null;unlockScreen();
-  if(!segs.length){commit();toast("Spåret var för kort för att sparas.");}
-  else{const d=new Date(r.startedAt);
-    state.tracks.unshift({id:r.id,name:"Spår "+d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"})+" "+d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}),startedAt:r.startedAt,durationMs:r.activeMs,dist:recDist(segs),segs,visible:true});
-    commit();toast("Spåret är sparat.");}
-  if(!follow)stopGps();buildTracks();requestRender();refreshSheet();
+  if(!state.recording)return;finishRec(0);
+  if(!follow)stopGps();buildTracks();requestRender();setTab("spar",false);openSheet("rideDone");
 }
 
 /* ---------- ride mode (phone on the handlebar) ---------- */
@@ -676,7 +678,7 @@ function onOrient(e){
   h=(h+so+DECLINATION+720)%360;
   compassHd=compassHd==null?h:(compassHd+normDeg(h-compassHd)*0.25+360)%360;
   const now=performance.now();if(now-lastCompassApply<150)return;lastCompassApply=now;
-  if(ride&&(ride.speed==null||ride.speed<=2))setHeading(compassHd,0.4,false);
+  if(ride){if(ride.speed==null||ride.speed<=2)setHeading(compassHd,0.4,false);}else requestRender();
 }
 function startCompass(){if(compassOn)return;compassOn=true;if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onOrient);else window.addEventListener("deviceorientation",onOrient);}
 function stopCompass(){window.removeEventListener("deviceorientationabsolute",onOrient);window.removeEventListener("deviceorientation",onOrient);compassOn=false;compassHd=null;}
@@ -764,6 +766,7 @@ function updateRideUI(){
 }
 function startRide(){
   if(!T){setTab("kalib");toast("Kalibrera kartan först, så att din position hamnar rätt.",4000);return;}
+  if(state.pendingRide&&!state.recording){setTab("spar",false);openSheet("rideDone");toast("Välj först om du vill spara förra turen.",3500);return;}
   requestCompass();
   const p=ridePrefs();
   ride={headingUp:p.headingUp!==false,locked:true,bearing:0,maxSpeed:0,speed:null,prevFix:null,courseFix:null};
@@ -781,12 +784,9 @@ function unlockRide(){ride.bearing=normDeg(ride.bearing);applyRot(true);ride.loc
 function relock(){if(!ride)return;clearTimeout(relockTimer);ride.bearing=normDeg(ride.bearing);ride.locked=true;follow=true;applyRot();rideFollow(false);saveRidePrefs();updateRideUI();render();}
 function endRide(){
   if(!ride)return;saveRidePrefs();
-  const r=state.recording;let saved=null;
-  if(r){if(!r.paused)r.activeMs+=Date.now()-r.resumedAt;const segs=r.segs.filter(s=>s.length>1);state.recording=null;
-    if(segs.length){const d=new Date(r.startedAt);saved={id:r.id,name:"Tur "+d.toLocaleDateString("sv-SE",{day:"numeric",month:"short"})+" "+d.toLocaleTimeString("sv-SE",{hour:"2-digit",minute:"2-digit"}),startedAt:r.startedAt,durationMs:r.activeMs,dist:recDist(segs),segs,visible:true,maxSpeed:ride.maxSpeed,gapSec:r.gapSec||0};state.tracks.unshift(saved);}
-    commit();}
-  clearTimeout(relockTimer);ride=null;pendingRide=saved?saved.id:null;
-  document.body.classList.remove("ride");$("#ride").hidden=true;applyRot(true);keepAwake(false);stopCompass();
+  finishRec(ride.maxSpeed);
+  clearTimeout(relockTimer);ride=null;
+  document.body.classList.remove("ride");$("#ride").hidden=true;applyRot(true);keepAwake(false);
   follow=false;stopGps();updateLocBtn();buildTracks();
   setTab("spar",false);openSheet("rideDone");requestRender();
 }
@@ -897,21 +897,24 @@ mat(){
 },
 spar(){
   const r=state.recording;let top;
-  if(r)top='<p class="hint">Du har en tur som pågår'+(r.paused?" (pausad)":"")+', '+fmtDist(r.dist)+' hittills.</p><div class="btns"><button class="btn rec" data-act="rideStart">Fortsätt cyklingen</button><button class="btn" data-act="recStop">Avsluta och spara</button></div>';
+  const pend=state.pendingRide?'<div class="status warn">Du har en tur på '+fmtDist(state.pendingRide.dist)+' som inte är sparad än. <button class="btn" style="margin-top:8px" data-act="rideReview">Spara eller släng</button></div>':"";
+  if(r)top='<p class="hint">Du har en tur som pågår'+(r.paused?" (pausad)":"")+', '+fmtDist(r.dist)+' hittills.</p><div class="btns"><button class="btn rec" data-act="rideStart">Fortsätt cyklingen</button><button class="btn" data-act="recStop">Avsluta</button></div>';
   else top='<p class="hint">Cykelläget är gjort för mobilen på styret. Siffrorna är stora, kartan följer dig och vrids åt det håll du cyklar, och den är låst så att skakningar och regndroppar inte flyttar den. Turen spelas in automatiskt.</p>'+(T?"":noCalibNote("Kartan behöver kalibreras innan du kan se dig själv i cykelläget."))+
     '<div class="btns"><button class="btn rec wide" data-act="rideStart" '+(T?"":"disabled")+'>Starta cykling</button></div>'+
     '<details><summary>Tips för styret</summary><p class="hint">Avsluta genom att hålla inne knappen uppe till vänster. Skärmen hålls tänd medan du cyklar, men om den ändå släcks kan du ställa in automatiskt skärmlås på Aldrig i telefonens inställningar under turen. Skärm och GPS drar mycket ström, så ta gärna med en powerbank på längre turer. När du står still vrids kartan med telefonens kompass. Magnetiska mobilhållare kan störa kompassen, men när du cyklar används GPS:en i stället.</p></details>';
-  const list=state.tracks.map(t=>'<li><div class="row"><span class="ic">🚵</span><span class="tx"><span class="t1">'+esc(t.name)+'</span><span class="t2">'+fmtDist(t.dist)+" · "+fmtDur(t.durationMs)+(t.maxSpeed?" · max "+Math.round(t.maxSpeed*3.6)+" km/h":"")+'</span></span></div><div class="trk-actions"><button class="btn" data-act="trkShow" data-id="'+t.id+'">'+(t.visible===false?"Visa":"Dölj")+'</button><button class="btn" data-act="trkGo" data-id="'+t.id+'" '+(T?"":"disabled")+'>Gå till</button><button class="btn" data-act="trkExport" data-id="'+t.id+'">Exportera GPX</button><button class="btn danger" data-act="trkDel" data-id="'+t.id+'">Ta bort</button></div></li>').join("");
+  const list=state.tracks.map(t=>'<li><div class="row"><span class="ic">🚵</span><span class="tx"><span class="t1">'+esc(t.name)+'</span><span class="t2">'+fmtDist(t.dist)+" · "+fmtDur(t.durationMs)+(t.maxSpeed?" · max "+Math.round(t.maxSpeed*3.6)+" km/h":"")+'</span></span></div><div class="trk-actions"><button class="btn" data-act="trkExport" data-id="'+t.id+'">Exportera GPX</button><button class="btn danger" data-act="trkDel" data-id="'+t.id+'">Ta bort</button></div></li>').join("");
   const routes=state.routes||[];
   const rlist=routes.map(r=>{const act=r.id===state.activeRoute;return '<li><div class="row"><span class="ic">🗺️</span><span class="tx"><span class="t1">'+esc(r.name)+'</span><span class="t2">'+fmtDist(r.dist)+(act?" · följs":"")+'</span></span></div><div class="trk-actions"><button class="btn'+(act?" primary":"")+'" data-act="routeFollow" data-id="'+r.id+'">'+(act?"Följs ✓":"Följ")+'</button><button class="btn" data-act="routeShow" data-id="'+r.id+'">'+(r.visible===false?"Visa":"Dölj")+'</button><button class="btn" data-act="routeGo" data-id="'+r.id+'" '+(T?"":"disabled")+'>Gå till</button><button class="btn danger" data-act="routeDel" data-id="'+r.id+'">Ta bort</button></div></li>';}).join("");
   const routeHtml='<h3>Rutter att följa</h3><p class="hint">Ladda upp en GPX-fil som du planerat i till exempel Strava, Komoot eller Garmin. Den visas som en gul linje, och när du cyklar ser du hur långt det är kvar och om du kommit ifrån rutten.</p><div class="btns"><button class="btn" data-act="routeAdd">Ladda upp GPX-fil</button></div>'+(routes.length?'<ul class="list">'+rlist+'</ul>':'');
-  return '<h2>Cykla</h2>'+top+routeHtml+(state.tracks.length?'<h3>Sparade turer</h3><ul class="list">'+list+"</ul>":"");
+  return '<h2>Cykla</h2>'+pend+top+routeHtml+(state.tracks.length?'<h3>Sparade turer</h3><ul class="list">'+list+"</ul>":"");
 },
 rideDone(){
-  const s=pendingRide&&state.tracks.find(x=>x.id===pendingRide);
+  const s=state.pendingRide;
   if(!s)return '<h2>Cyklingen är avslutad</h2><p class="hint">Ingen sträcka hann registreras, så det finns ingen tur att spara.</p><div class="btns"><button class="btn primary" data-act="rideOk">Klar</button></div>';
   const avg=s.durationMs>0?s.dist/(s.durationMs/1000)*3.6:0;
-  return '<h2>Bra kört!</h2><div class="big">'+fmtDist(s.dist)+'</div><p class="hint">'+fmtClock(s.durationMs)+" · snitt "+nf(avg,1)+" km/h · max "+Math.round((s.maxSpeed||0)*3.6)+' km/h</p>'+((s.gapSec||0)>60?'<div class="status warn">GPS:en var pausad i ungefär '+fmtDur(s.gapSec*1000)+', troligen för att skärmen släcktes. Sträckan kan därför bli kortare än den egentligen var.</div>':'')+'<p class="hint">Turen är sparad.</p><label class="field"><span>Namn på turen</span><input id="rideName" maxlength="80" value="'+esc(s.name)+'"></label><div class="btns"><button class="btn primary wide" data-act="rideSave">Klar</button><button class="btn danger" data-act="rideDiscard">Ta bort turen</button></div>';
+  return '<h2>Vill du spara turen?</h2><div class="big">'+fmtDist(s.dist)+'</div><p class="hint">'+fmtClock(s.durationMs)+" · snitt "+nf(avg,1)+" km/h · max "+Math.round((s.maxSpeed||0)*3.6)+' km/h</p>'+
+    ((s.gapSec||0)>60?'<div class="status warn">GPS:en var pausad i ungefär '+fmtDur(s.gapSec*1000)+', troligen för att skärmen släcktes eller en annan app låg överst. Sträckan kan därför bli kortare än den egentligen var.</div>':'')+
+    '<label class="field"><span>Namn på turen</span><input id="rideName" maxlength="80" value="'+esc(s.name)+'"></label><div class="btns"><button class="btn primary wide" data-act="rideSave">Spara turen</button><button class="btn danger" data-act="rideDiscard">Släng</button></div>';
 },
 kalib(){
   const P=state.calib;let status;
@@ -986,9 +989,10 @@ const ACT={
   routeShow(b){const r=(state.routes||[]).find(x=>x.id===b.dataset.id);if(!r)return;r.visible=r.visible===false;commit();buildTracks();refreshSheet();},
   routeGo(b){const r=(state.routes||[]).find(x=>x.id===b.dataset.id);if(!r)return;r.visible=true;commit();buildTracks();fitSegs(r.segs);refreshSheet();},
   routeDel(b){armConfirm(b,"Tryck igen",()=>{state.routes=(state.routes||[]).filter(x=>x.id!==b.dataset.id);if(state.activeRoute===b.dataset.id)state.activeRoute=null;routeCache=null;commit();buildTracks();refreshSheet();});},
-  rideSave(){const s=state.tracks.find(x=>x.id===pendingRide);if(s){const n=$("#rideName").value.trim();if(n&&n!==s.name){s.name=n;commit();}}pendingRide=null;openSheet("spar");},
-  rideDiscard(b){armConfirm(b,"Tryck igen för att ta bort",()=>{state.tracks=state.tracks.filter(x=>x.id!==pendingRide);pendingRide=null;commit();buildTracks();requestRender();openSheet("spar");toast("Turen är borttagen.");});},
-  rideOk(){pendingRide=null;openSheet("spar");},
+  rideSave(){const s=state.pendingRide;if(!s)return;const n=$("#rideName").value.trim();if(n)s.name=n;state.tracks.unshift(s);state.pendingRide=null;commit();openSheet("spar");toast("Turen är sparad.");},
+  rideDiscard(b){armConfirm(b,"Tryck igen för att slänga",()=>{state.pendingRide=null;commit();openSheet("spar");toast("Turen är slängd.");});},
+  rideOk(){openSheet("spar");},
+  rideReview(){openSheet("rideDone");},
   recStart(){startRec();},
   recPause(){pauseRec();},
   recStop(){stopRec();},
@@ -1021,7 +1025,8 @@ if(img.complete)ready();else{img.addEventListener("load",ready);img.addEventList
 new ResizeObserver(()=>resize()).observe(mapEl);
 document.addEventListener("DOMContentLoaded",requestRender);
 computeCalib();rebuildPins();buildTracks();
-if(state.recording){const r=state.recording;if(!r.paused){const seg=r.segs[r.segs.length-1],lp=seg&&seg[seg.length-1];const endT=lp?lp[2]*1000:r.resumedAt;r.activeMs+=Math.max(0,endT-r.resumedAt);r.paused=true;saveLocal();}setTab("spar");toast("Din tur är pausad. Tryck Fortsätt cyklingen för att köra vidare.",4500);}
+if(state.pendingRide&&!state.recording){setTab("spar",false);openSheet("rideDone");}
+else if(state.recording){const r=state.recording;if(!r.paused){const seg=r.segs[r.segs.length-1],lp=seg&&seg[seg.length-1];const endT=lp?lp[2]*1000:r.resumedAt;r.activeMs+=Math.max(0,endT-r.resumedAt);r.paused=true;saveLocal();}setTab("spar");toast("Din tur är pausad. Tryck Fortsätt cyklingen för att köra vidare.",4500);}
 else{let seen=false;try{seen=!!localStorage.getItem(LS_INTRO);}catch(e){}if(!seen&&!state.calib.length&&!sharedCalib)openSheet("intro");}
 })();
 </script>
