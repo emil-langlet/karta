@@ -682,9 +682,7 @@ function onOrient(e){
 }
 let compassEvents=0,compassChecked=false;
 function startCompass(){if(compassOn)return;compassOn=true;compassEvents=0;
-  window.addEventListener("deviceorientationabsolute",onOrient);window.addEventListener("deviceorientation",onOrient);
-  if(!compassChecked)setTimeout(()=>{if(!compassOn||compassHd!=null)return;compassChecked=true;
-    toast(compassEvents?"Telefonen skickar rörelsedata men ingen kompassriktning. Prova att kalibrera kompassen genom att röra telefonen i en åtta.":"Telefonen skickar ingen kompassriktning till sidan. Kontrollera att Rörelsesensorer är tillåtet för sidan i Chrome.",7000);},4000);}
+  window.addEventListener("deviceorientationabsolute",onOrient);window.addEventListener("deviceorientation",onOrient);}
 function stopCompass(){window.removeEventListener("deviceorientationabsolute",onOrient);window.removeEventListener("deviceorientation",onOrient);compassOn=false;compassHd=null;}
 function requestCompass(){try{if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){DeviceOrientationEvent.requestPermission().then(s=>{if(s==="granted")startCompass();}).catch(()=>{});}else startCompass();}catch(e){}}
 
@@ -932,7 +930,7 @@ kalib(){
   return '<h2>Kalibrera kartan</h2><p class="hint">För att din position ska hamna rätt behöver appen veta var några punkter på kartan ligger i verkligheten. Välj tydliga ställen, som vägkorsningar, broar eller udden på en sjö.</p>'+status+
   '<div class="btns"><button class="btn primary" data-act="calAdd">Lägg till punkt</button></div><ul class="list">'+rows+"</ul>"+
   '<details><summary>Så hittar du koordinater</summary><p class="hint">Öppna Google Maps, håll fingret på samma ställe som du pekat ut här tills en nål dyker upp, och kopiera siffrorna, till exempel 59.31120, 18.20350. Du kan också gå till platsen och använda telefonens GPS.</p></details>'+
-  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 6 · Kompass: '+(compassHd!=null?"fungerar":compassOn?(compassEvents?"ingen riktning":"ingen signal"):"av")+'</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
+  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 7</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
 },
 calibPoint(){
   return '<h2>Punkt '+(state.calib.length+1)+'</h2><p>Var ligger stället du markerade i verkligheten?</p><label class="field"><span>Koordinater (lat, long)</span><input id="calLL" inputmode="decimal" autocomplete="off" placeholder="59.31120, 18.20350"></label><div class="btns"><button class="btn primary wide" data-act="calSaveLL">Spara punkten</button></div>'+
