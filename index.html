@@ -482,10 +482,10 @@ function render(){
   // screen overlay
   let s="";
   if(plan&&plan.pts.length){
-    let d="";const SP=[];for(const sg of plan.segs)for(let k=0;k<sg.length;k+=2){const q=toScreen(sg[k],sg[k+1]);d+=(k?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1);SP.push(q[0],q[1]);}
+    let d="";const SP=[];for(const sg of plan.segs)if(sg)for(let k=0;k<sg.length;k+=2){const q=toScreen(sg[k],sg[k+1]);d+=(k?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1);SP.push(q[0],q[1]);}
     if(d)s+='<path d="'+d+'" fill="none" stroke="#151515" stroke-width="'+(routeW+2).toFixed(1)+'" stroke-linecap="round" stroke-linejoin="round" opacity=".4"/><path d="'+d+'" fill="none" stroke="#FFD60A" stroke-width="'+routeW.toFixed(1)+'" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>';
     if(SP.length>2){const ad=arrowsAlong(SP,95,Math.max(10,routeW*1.6));if(ad)s+='<path d="'+ad+'" fill="none" stroke="#151515" stroke-width="'+Math.max(2,routeW*0.4).toFixed(1)+'" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>';}
-    plan.pts.forEach((p,i)=>{const q=toScreen(p[0],p[1]);s+='<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+(i===0?9:7)+'" fill="'+(i===0?"#2E8B4E":"#fff")+'" stroke="#151515" stroke-width="2.5"/>';});
+    plan.pts.forEach((p,i)=>{const q=toScreen(p[0],p[1]),sel=plan.sel===i;s+='<circle cx="'+q[0].toFixed(1)+'" cy="'+q[1].toFixed(1)+'" r="'+(sel?11:i===0?9:7)+'" fill="'+(i===0?"#2E8B4E":"#fff")+'" stroke="'+(sel?"var(--gps)":"#151515")+'" stroke-width="'+(sel?4:2.5)+'"/>';});
   }
   if(measure.length&&tab==="mat"){
     const pts=measure.map(p=>toScreen(p[0],p[1]));
@@ -528,6 +528,8 @@ mapEl.addEventListener("pointerdown",e=>{
   try{mapEl.setPointerCapture(e.pointerId);}catch(_){}
   stopInertia();cancelAnim();
   const p=local(e);pointers.set(e.pointerId,p);
+  if(pointers.size===2&&g&&g.type==="dragpt"&&g.moved)movePlanPoint(g.idx,plan.pts[g.idx][0],plan.pts[g.idx][1],true);
+  if(pointers.size===1&&mode==="plan"&&plan){const hp=hitPlanPoint(p);if(hp>=0){g={type:"dragpt",idx:hp,sx:p.x,sy:p.y,moved:false};return;}}
   if(pointers.size===1){
     g={type:"pan",sx:p.x,sy:p.y,tx:view.tx,ty:view.ty,moved:false,multi:false,long:false};samples=[{x:p.x,y:p.y,t:performance.now()}];
     clearTimeout(lpTimer);lpTimer=setTimeout(()=>{if(g&&g.type==="pan"&&!g.moved&&pointers.size===1){g.long=true;onLongPress(p);}},560);
@@ -538,6 +540,11 @@ mapEl.addEventListener("pointerdown",e=>{
 });
 mapEl.addEventListener("pointermove",e=>{
   if(!pointers.has(e.pointerId)||!g)return;const p=local(e);pointers.set(e.pointerId,p);
+  if(g.type==="dragpt"&&pointers.size===1){
+    if(!g.moved&&Math.hypot(p.x-g.sx,p.y-g.sy)>6){g.moved=true;pushHist();plan.sel=g.idx;updatePlanBar();}
+    if(g.moved){const q=toImg(p.x,p.y);movePlanPoint(g.idx,q[0],q[1],false);}
+    return;
+  }
   if(g.type==="pan"&&pointers.size===1){
     const dx=p.x-g.sx,dy=p.y-g.sy;
     if(!g.moved&&Math.hypot(dx,dy)>7){g.moved=true;clearTimeout(lpTimer);mapEl.classList.add("dragging");setFollow(false);}
@@ -555,6 +562,7 @@ function endPointer(e){
   if(pointers.size===1&&g.type==="pinch"){const p=[...pointers.values()][0];g={type:"pan",sx:p.x,sy:p.y,tx:view.tx,ty:view.ty,moved:true,multi:true};samples=[];return;}
   if(pointers.size===0){
     mapEl.classList.remove("dragging");const gg=g;g=null;
+    if(gg.type==="dragpt"){if(!plan)return;if(gg.moved){const q=plan.pts[gg.idx];movePlanPoint(gg.idx,q[0],q[1],true);}else if(e.type!=="pointercancel"){plan.sel=plan.sel===gg.idx?null:gg.idx;planChanged();}return;}
     if(e.type==="pointercancel"){saveViewSoon();return;}
     if(gg.type==="pan"&&!gg.moved&&!gg.multi&&!gg.long)onTap(local(e));
     else if(gg.type==="pan"&&gg.moved&&!gg.multi)startInertia();
@@ -567,6 +575,7 @@ mapEl.addEventListener("wheel",e=>{if(e.target.closest(".sheet"))return;e.preven
 mapEl.addEventListener("contextmenu",e=>{if(!e.target.closest(".sheet"))e.preventDefault();});
 document.addEventListener("keydown",e=>{if(e.target.closest("input,textarea"))return;
   if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&(e.key==="z"||e.key==="Z")){if(mode==="plan"){e.preventDefault();planUndo();}return;}
+  if(mode==="plan"&&plan&&plan.sel!=null&&(e.key==="Delete"||e.key==="Backspace")){e.preventDefault();deletePlanPoint(plan.sel);return;}
   if(e.key==="+"||e.key==="=")zoomAt(W/2,H/2,view.s*1.5,true);else if(e.key==="-")zoomAt(W/2,H/2,view.s/1.5,true);else if(e.key==="Escape"){if(mode==="plan"){endPlan();setTab("rutter");}else if(mode.startsWith("place"))cancelPlacing();else closeSheet();}});
 
 function hitPin(p){let best=null,bd=26;for(const pin of state.pins){const q=toScreen(pin.x,pin.y);const d=Math.hypot(p.x-q[0],p.y-(q[1]-22));if(d<bd){bd=d;best=pin;}}return best;}
@@ -576,7 +585,7 @@ function inMap(x,y){return x>=0&&y>=0&&x<=IMG_W&&y<=IMG_H;}
 let mode="browse",measure=[],pendingPoint=null,tab="karta",sheet=null;
 function onTap(p){
   const [ix,iy]=toImg(p.x,p.y);
-  if(mode==="plan"){addPlanPoint(ix,iy);return;}
+  if(mode==="plan"){planTap(p,ix,iy);return;}
   if(mode==="planSave")return;
   if(mode==="measure"){if(!inMap(ix,iy))return;measure.push([ix,iy]);requestRender();refreshSheet();return;}
   if(mode==="placePin"){if(!inMap(ix,iy))return;setPlacing(null);openSheet("pinEdit",{x:ix,y:iy});return;}
@@ -816,41 +825,97 @@ function netRoute(N,A,B){
   return pts;
 }
 
-/* ---------- plan a route by tapping points ---------- */
-let NET=null,plan=null;const SNAP_MAX=25;
+/* ---------- plan a route: tap to add, drag to move, tap the line to insert ---------- */
+let NET=null,plan=null;const SNAP_MAX=25,LS_PLAN="minkarta:plan";
 function getNet(){if(NET)return NET;const el=document.getElementById("trailnet");if(!el)return null;try{NET=makeNet(JSON.parse(el.textContent));}catch(e){NET=null;}return NET;}
 function polyLen(pts){let L=0;for(let k=2;k<pts.length;k+=2)L+=Math.hypot(pts[k]-pts[k-2],pts[k+1]-pts[k-1]);return L;}
-function startPlan(){
+function newPlan(){return {pts:[],snaps:[],segs:[],snap:true,sel:null,hist:[]};}
+function startPlan(restore){
   if(!T){setTab("kalib");toast("Kalibrera kartan först.",3000);return;}
   if(mode.startsWith("place"))cancelPlacing();
-  plan={pts:[],snaps:[],segs:[],snap:true};mode="plan";sheet=null;sheetEl.hidden=true;
+  plan=newPlan();
+  if(restore){const N=getNet();plan.pts=restore.pts;plan.segs=restore.segs;plan.snap=restore.snap!==false;
+    plan.snaps=restore.pts.map((q,i)=>restore.snapOk&&restore.snapOk[i]&&N?netSnap(N,q[0],q[1],4):null);}
+  mode="plan";sheet=null;sheetEl.hidden=true;
   document.body.classList.add("planning");$("#planBar").hidden=false;getNet();updatePlanBar();requestRender();
 }
-function endPlan(){plan=null;mode=tab==="mat"?"measure":"browse";document.body.classList.remove("planning");$("#planBar").hidden=true;requestRender();}
+function endPlan(){plan=null;clearDraft();mode=tab==="mat"?"measure":"browse";document.body.classList.remove("planning");$("#planBar").hidden=true;requestRender();}
+function saveDraft(){if(!plan)return;try{localStorage.setItem(LS_PLAN,JSON.stringify({v:1,pts:plan.pts,segs:plan.segs,snap:plan.snap,snapOk:plan.snaps.map(s=>!!s)}));}catch(e){}}
+function clearDraft(){try{localStorage.removeItem(LS_PLAN);}catch(e){}}
+function loadDraft(){try{const d=JSON.parse(localStorage.getItem(LS_PLAN));if(d&&d.v===1&&Array.isArray(d.pts)&&d.pts.length&&Array.isArray(d.segs))return d;}catch(e){}return null;}
+function pushHist(){plan.hist.push(JSON.stringify({pts:plan.pts,segs:plan.segs,snaps:plan.snaps}));if(plan.hist.length>60)plan.hist.shift();}
+function planChanged(){saveDraft();updatePlanBar();requestRender();}
+/* the stretch between point i and i+1, along the trails when possible */
+function routeSeg(i,quiet){
+  const a=plan.pts[i],b=plan.pts[i+1],N=plan.snap?getNet():null;let seg=null;
+  if(N&&plan.snaps[i]&&plan.snaps[i+1]){seg=netRoute(N,plan.snaps[i],plan.snaps[i+1]);if(!seg&&!quiet)toast("Stigarna hänger inte ihop här, så den här biten blir ett rakt streck.",3500);}
+  if(!seg)seg=[a[0],a[1],b[0],b[1]];
+  if(!quiet){const L=polyLen(seg),straight=Math.hypot(b[0]-a[0],b[1]-a[1]);if(L>straight*3&&(L-straight)/T.ppm>300)toast("Rutten gör en omväg här. Lägg till en punkt eller flytta en punkt för att styra den.",4000);}
+  plan.segs[i]=seg;
+}
+function snapAt(x,y,quiet){
+  const N=plan.snap?getNet():null;if(!N)return {pt:[x,y],S:null};
+  const S=netSnap(N,x,y,SNAP_MAX);if(S)return {pt:[S.x,S.y],S};
+  if(!quiet)toast("Ingen stig nära punkten, så den här biten blir ett rakt streck.",3000);return {pt:[x,y],S:null};
+}
 function addPlanPoint(x,y){
-  if(!inMap(x,y))return;
-  const N=plan.snap?getNet():null;let pt=[x,y],seg=null,S=null;
-  const prev=plan.pts[plan.pts.length-1],prevS=plan.snaps[plan.snaps.length-1];
-  if(N){S=netSnap(N,x,y,SNAP_MAX);
-    if(S){pt=[S.x,S.y];if(prev&&prevS){seg=netRoute(N,prevS,S);if(!seg)toast("Stigarna hänger inte ihop här, så den här biten blir ett rakt streck.",3500);}}
-    else toast("Ingen stig nära punkten, så den här biten blir ett rakt streck.",3000);}
-  if(prev&&!seg)seg=[prev[0],prev[1],pt[0],pt[1]];
-  if(seg&&prev){const L=polyLen(seg),straight=Math.hypot(pt[0]-prev[0],pt[1]-prev[1]);if(L>straight*3&&(L-straight)*T.ppm**-1>300)toast("Rutten gör en omväg här. Lägg till en punkt där den ska gå om du vill styra den.",4000);}
-  plan.pts.push(pt);plan.snaps.push(S);if(seg)plan.segs.push(seg);
-  updatePlanBar();requestRender();
+  if(!inMap(x,y))return;pushHist();
+  const r=snapAt(x,y);plan.pts.push(r.pt);plan.snaps.push(r.S);
+  if(plan.pts.length>1)routeSeg(plan.pts.length-2);
+  if(plan.pts.length===2){let seen=false;try{seen=!!localStorage.getItem("minkarta:plantip");localStorage.setItem("minkarta:plantip","1");}catch(e){}
+    if(!seen)setTimeout(()=>toast("Tips: dra i en punkt för att flytta den, eller tryck på linjen för att lägga till en punkt mitt i.",5500),3600);}
+  planChanged();
 }
-function planUndo(){if(!plan||!plan.pts.length)return;plan.pts.pop();plan.snaps.pop();if(plan.segs.length>Math.max(0,plan.pts.length-1))plan.segs.pop();updatePlanBar();requestRender();}
-function planMeters(){return plan?plan.segs.reduce((a,s)=>a+polyLen(s),0)/T.ppm:0;}
+function insertPlanPoint(h){
+  pushHist();const sg=plan.segs[h.i];
+  const left=sg.slice(0,h.k+2).concat([h.x,h.y]),right=[h.x,h.y].concat(sg.slice(h.k+2));
+  plan.segs.splice(h.i,1,left,right);plan.pts.splice(h.i+1,0,[h.x,h.y]);
+  const N=plan.snap?getNet():null;plan.snaps.splice(h.i+1,0,N&&plan.snaps[h.i]&&plan.snaps[h.i+1]?netSnap(N,h.x,h.y,4):null);
+  plan.sel=h.i+1;planChanged();
+}
+function deletePlanPoint(idx){
+  const n=plan.pts.length;if(idx==null||idx<0||idx>=n)return;pushHist();
+  if(idx===0){plan.pts.shift();plan.snaps.shift();plan.segs.shift();}
+  else if(idx===n-1){plan.pts.pop();plan.snaps.pop();plan.segs.pop();}
+  else{plan.pts.splice(idx,1);plan.snaps.splice(idx,1);plan.segs.splice(idx-1,2,null);routeSeg(idx-1);}
+  plan.sel=null;planChanged();
+}
+function movePlanPoint(idx,x,y,final){
+  if(final){const r=snapAt(x,y);plan.pts[idx]=r.pt;plan.snaps[idx]=r.S;if(idx>0)routeSeg(idx-1);if(idx<plan.pts.length-1)routeSeg(idx);planChanged();return;}
+  plan.pts[idx]=[x,y];const q=plan.pts;
+  if(idx>0)plan.segs[idx-1]=[q[idx-1][0],q[idx-1][1],x,y];
+  if(idx<q.length-1)plan.segs[idx]=[x,y,q[idx+1][0],q[idx+1][1]];
+  requestRender();
+}
+function hitPlanPoint(p){if(!plan)return -1;let best=-1,bd=24;plan.pts.forEach((q,i)=>{const s=toScreen(q[0],q[1]),d=Math.hypot(s[0]-p.x,s[1]-p.y);if(d<bd){bd=d;best=i;}});return best;}
+function hitPlanLine(p){
+  if(!plan)return null;let best=null,bd=15;
+  plan.segs.forEach((sg,i)=>{for(let k=0;k+2<sg.length;k+=2){const a=toScreen(sg[k],sg[k+1]),b=toScreen(sg[k+2],sg[k+3]),dx=b[0]-a[0],dy=b[1]-a[1],L2=dx*dx+dy*dy;
+    let u=L2>0?((p.x-a[0])*dx+(p.y-a[1])*dy)/L2:0;u=Math.max(0,Math.min(1,u));const d=Math.hypot(a[0]+u*dx-p.x,a[1]+u*dy-p.y);
+    if(d<bd){bd=d;best={i,k,x:sg[k]+u*(sg[k+2]-sg[k]),y:sg[k+1]+u*(sg[k+3]-sg[k+1])};}}});
+  return best;
+}
+function planTap(p,ix,iy){
+  const hp=hitPlanPoint(p);if(hp>=0){plan.sel=plan.sel===hp?null:hp;planChanged();return;}
+  if(plan.sel!=null){plan.sel=null;planChanged();return;}
+  const h=hitPlanLine(p);if(h){insertPlanPoint(h);toast("Ny punkt. Dra den dit rutten ska gå.",2500);return;}
+  addPlanPoint(ix,iy);
+}
+function planUndo(){if(!plan||!plan.hist.length)return;const s=JSON.parse(plan.hist.pop());plan.pts=s.pts;plan.segs=s.segs;plan.snaps=s.snaps;plan.sel=null;planChanged();}
+function planMeters(){return plan?plan.segs.reduce((a,s)=>a+(s?polyLen(s):0),0)/T.ppm:0;}
 function updatePlanBar(){
-  if(!plan)return;const n=plan.pts.length;
+  if(!plan)return;const n=plan.pts.length,sel=plan.sel;
   $("#pbDist").textContent=fmtDist(planMeters());
-  $("#pbHint").textContent=n===0?"Tryck där rutten ska börja.":n===1?"Tryck på nästa punkt längs vägen.":n+" punkter"+(plan.snap?" · följer stigarna":" · raka streck");
-  $("#pbUndo").disabled=!n;$("#pbSave").disabled=n<2;$("#pbSnap").setAttribute("aria-pressed",String(plan.snap));
+  $("#pbHint").textContent=sel!=null?"Punkt "+(sel+1)+" vald. Dra för att flytta.":n===0?"Tryck där rutten ska börja.":n===1?"Tryck på nästa punkt längs vägen.":n+" punkter"+(plan.snap?" · följer stigarna":" · raka streck");
+  const c=$("#pbCancel");c.textContent=sel!=null?"Ta bort":"Avbryt";c.classList.toggle("danger",sel!=null);
+  $("#pbUndo").disabled=!plan.hist.length;$("#pbSave").disabled=n<2;$("#pbSnap").setAttribute("aria-pressed",String(plan.snap));
 }
-$("#pbSnap").addEventListener("click",()=>{if(!plan)return;plan.snap=!plan.snap;updatePlanBar();toast(plan.snap?"Nya punkter följer stigarna.":"Nya punkter dras med raka streck.",2200);});
+$("#pbSnap").addEventListener("click",()=>{if(!plan)return;plan.snap=!plan.snap;saveDraft();updatePlanBar();toast(plan.snap?"Nya punkter följer stigarna.":"Nya punkter dras med raka streck.",2200);});
 $("#pbUndo").addEventListener("click",planUndo);
-$("#pbCancel").addEventListener("click",e=>{const b=e.currentTarget;if(plan&&plan.pts.length>1)armConfirm(b,"Släng?",()=>{endPlan();setTab("rutter");});else{endPlan();setTab("rutter");}});
-$("#pbSave").addEventListener("click",()=>{if(!plan||plan.pts.length<2)return;mode="planSave";$("#planBar").hidden=true;openSheet("planSave");});
+$("#pbCancel").addEventListener("click",e=>{const b=e.currentTarget;if(!plan)return;
+  if(plan.sel!=null){deletePlanPoint(plan.sel);return;}
+  if(plan.pts.length>1)armConfirm(b,"Släng?",()=>{endPlan();setTab("rutter");});else{endPlan();setTab("rutter");}});
+$("#pbSave").addEventListener("click",()=>{if(!plan||plan.pts.length<2)return;plan.sel=null;mode="planSave";$("#planBar").hidden=true;openSheet("planSave");});
 function savePlan(name){
   const flat=[];plan.segs.forEach((s,i)=>{for(let k=i?2:0;k<s.length;k+=2)flat.push(s[k],s[k+1]);});
   const pts=[];for(let k=0;k<flat.length;k+=2){const ll=toLL(flat[k],flat[k+1]),q=[+ll[0].toFixed(6),+ll[1].toFixed(6)],l=pts[pts.length-1];if(!l||l[0]!==q[0]||l[1]!==q[1])pts.push(q);}
@@ -1103,7 +1168,7 @@ kalib(){
   return '<h2>Inställningar</h2><h3>Kalibrering</h3><p class="hint">För att din position ska hamna rätt behöver appen veta var några punkter på kartan ligger i verkligheten. Välj tydliga ställen, som vägkorsningar, broar eller udden på en sjö.</p>'+status+
   '<div class="btns"><button class="btn primary" data-act="calAdd">Lägg till punkt</button></div><ul class="list">'+rows+"</ul>"+
   '<details><summary>Så hittar du koordinater</summary><p class="hint">Öppna Google Maps, håll fingret på samma ställe som du pekat ut här tills en nål dyker upp, och kopiera siffrorna, till exempel 59.31120, 18.20350. Du kan också gå till platsen och använda telefonens GPS.</p></details>'+
-  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 18</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
+  '<h3>Dina data</h3><p class="hint">'+sync+'</p><p class="hint">Version 19</p><div class="btns"><button class="btn" data-act="backup">Exportera säkerhetskopia</button><button class="btn" data-act="restore">Läs in säkerhetskopia</button></div>';
 },
 calibPoint(){
   return '<h2>Punkt '+(state.calib.length+1)+'</h2><p>Var ligger stället du markerade i verkligheten?</p><label class="field"><span>Koordinater (lat, long)</span><input id="calLL" inputmode="decimal" autocomplete="off" placeholder="59.31120, 18.20350"></label><div class="btns"><button class="btn primary wide" data-act="calSaveLL">Spara punkten</button></div>'+
@@ -1205,7 +1270,9 @@ if(img.complete)ready();else{img.addEventListener("load",ready);img.addEventList
 new ResizeObserver(()=>resize()).observe(mapEl);
 document.addEventListener("DOMContentLoaded",requestRender);
 computeCalib();rebuildPins();buildTracks();
-if(state.pendingRide&&!state.recording){setTab("spar",false);openSheet("rideDone");}
+const draft=!state.recording?loadDraft():null;
+if(draft){setTab("rutter",false);startPlan(draft);toast("Din påbörjade rutt är återställd.",3000);}
+else if(state.pendingRide&&!state.recording){setTab("spar",false);openSheet("rideDone");}
 else if(state.recording){const r=state.recording;if(!r.paused){const seg=r.segs[r.segs.length-1],lp=seg&&seg[seg.length-1];const endT=lp?lp[2]*1000:r.resumedAt;r.activeMs+=Math.max(0,endT-r.resumedAt);r.paused=true;saveLocal();}setTab("spar");toast("Din tur är pausad. Tryck Fortsätt cyklingen för att köra vidare.",4500);}
 else{let seen=false;try{seen=!!localStorage.getItem(LS_INTRO);}catch(e){}if(!seen&&!state.calib.length&&!sharedCalib)openSheet("intro");}
 })();
